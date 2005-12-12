@@ -37,13 +37,37 @@ playback is efficient.
 
 Current status of ipbt:
  * Basically works.
- * Available keypresses during playback are not documented yet. Read
-   the source if you need to. (NetHackers will probably be used to
-   that anyway :-)
+ * Amenities such as online help and proper documentation are not
+   available yet.
  * Dependent on libncurses; uses the use_default_colors() extension
    function, which means it probably won't compile on other curses
    implementations without a bit of autoconf work.
  * Makefile is rudimentary at best. Porting work required. See the
    TODO file for a full list of desirable features.
+
+Proper documentation has yet to be written (as mentioned above), but
+here's a quick list of the available keystrokes during playback:
+
+ * `q' (or `Q') quits ipbt.
+ * Space moves on by a frame. Prefix it by a number to move on by
+   multiple frames at a time.
+ * `b' moves back by a frame. Prefix it by a number to move backwards by
+   multiple frames at a time.
+ * `o' toggles the on-screen display, which shows the current status
+   of ipbt.
+ * `L' toggles logarithmic time compression (designed to have little
+   effect on small delays but massively compress long ones).
+ * Typing a number followed by `x' causes play to proceed at that
+   many times normal speed (e.g. `3x' means play at triple speed).
+   Typing just `x' is equivalent to `1x': it restores normal speed.
+ * `X' is like `x', but slows down rather than speeding up: `2X'
+   means half speed and `3X' means one third speed. `X' on its own
+   restores normal speed, just like `x'.
+ * `g' jumps to the beginning of the animation. Prefixing a number
+   jumps to a particular frame.
+ * `G' jumps to the end of the animation. Prefixing a number jumps
+   to that many frames from the end.
+ * `p' (and also `s', for historical reasons) toggles pause mode.
+   Pause mode is initially enabled.
 
 Oh, and `ipbt' stands for `It's Play-Back Time'.

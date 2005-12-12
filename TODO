@@ -39,6 +39,13 @@ Things I haven't quite decided whether I want yet:
    Depends on [CLOPT]. I'm not sure whether this is actually worth
    bothering with.
 
+ - [MMAP] It might be an interesting idea to optionally be able to
+   store the internal movie data in a disk file, probably just by
+   using mmap(2) instead of malloc(3). This would be convenient if
+   you planned to watch the same movie in multiple sittings: you'd
+   only have to go through IPBT's lengthy setup phase once. Depends
+   on [CLOPT].
+
  - [NHTURN] When reading a NetHack replay in particular, the program
    could usefully spot the turn counter on the status line and track
    it throughout the replay, which would permit the user to jump
@@ -52,7 +59,9 @@ Things I haven't quite decided whether I want yet:
    by its frame number, and if you need to track down a particular
    NetHack turn number you can binary-search the available frames.
    Alternatively, if [SEARCH] were implemented then you could just
-   search for `T:12345' (or whatever).
+   search for `T:12345', although this would take linear time rather
+   than the log time one could achieve by making use of the known
+   monotonicity.
 
 Longer-range ideas which would involve a lot of work:
 
@@ -84,3 +93,21 @@ Longer-range ideas which would involve a lot of work:
    the processed movie than the input data, since curses screen
    update optimisations might prevent your text appearing in full in
    the latter.
+
+ - [BGLOAD] The current movie data structure is simple and robust,
+   but it does have the nasty downside of an annoying wait when
+   loading the ttyrec to begin with. One possibility is to replace
+   the large array of movie records with a B-tree (high-degree to
+   minimise the memory overhead; we'd also want to ensure the B-tree
+   implementation supported the optimisation of not storing null
+   child pointers in the leaf nodes), so that the movie array was
+   built up in the correct retrieval order rather than requiring a
+   single monolithic sort operation during setup. This would permit
+   the player to start up instantly, and the rest of the file could
+   be read in the background while processing keypresses. There
+   would still be an unavoidable delay if the user wanted to go
+   straight to the end of the file or jump to a frame that wasn't
+   loaded yet, but it might be an improvement on the current
+   mechanism. On the other hand, the complexity of
+   background-loading the file might be prohibitive: it might
+   require multithreading to do properly, for example.

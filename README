@@ -5,7 +5,10 @@ files.
 terminal output during a Unix terminal session. Unlike script, it
 writes timestamps into the output file as well as raw output data,
 so that the session can be played back at the original speed. It is
-commonly used for recording games of NetHack.
+commonly used for recording games of NetHack. The ttyrec recorder
+program can be found at
+
+  http://namazu.org/~satoru/ttyrec/index.html.en
 
 Conventional ttyrec players are little more than a loop
 interspersing sleep(2) with write(2); it's easy to pause and
@@ -40,6 +43,7 @@ Current status of ipbt:
  * Dependent on libncurses; uses the use_default_colors() extension
    function, which means it probably won't compile on other curses
    implementations without a bit of autoconf work.
- * Makefile is rudimentary at best. Porting work required.
+ * Makefile is rudimentary at best. Porting work required. See the
+   TODO file for a full list of desirable features.
 
 Oh, and `ipbt' stands for `It's Play-Back Time'.

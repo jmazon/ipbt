@@ -1,0 +1,86 @@
+TODO/wishlist file for IPBT
+===========================
+
+Things I'd definitely like to see done:
+
+ - [CLOPT] Add a framework for supporting command-line options.
+
+ - [INSIZE] Currently the internal terminal emulator's screen size
+   is fixed at 80x24. It should be configurable via command-line
+   options. Depends on [CLOPT].
+
+ - [HELP] In the player, the user should be able to press `h' or `?'
+   (probably both) for a help screen. Currently the available
+   keypresses are completely undocumented other than by reading the
+   source.
+
+ - [UXPORT] Unix portability work. There ought to be an autoconf
+   framework, and any dependencies on ncurses rather than vanilla
+   curses (use_default_colors() in particular) ought to be hidden
+   behind autoconf-derived ifdefs.
+
+ - [OUTSIZE] Make intelligent use of the size of the output screen.
+   If you play an 80x24 animation on an 80x25 screen, for example,
+   there would be space to put a permanent OSD at the bottom rather
+   than being dependent on the current intrusive OSD. Conversely, if
+   you display a large animation on a small screen then it might be
+   nice to permit the user to scroll around the display area. While
+   we're here, we could usefully detect screen resizes in mid-replay
+   and do something useful with them (but see [UXPORT] - this has to
+   be done differently on vanilla curses which doesn't support
+   ncurses's incredibly useful KEY_RESIZE).
+
+Things I haven't quite decided whether I want yet:
+
+ - [GAP] Currently, if you specify more than one ttyrec file on the
+   input command line, ttyrec assumes a one-second delay between the
+   final frame of one and the initial frame of the next. This delay
+   could easily be made configurable using a command-line option.
+   Depends on [CLOPT]. I'm not sure whether this is actually worth
+   bothering with.
+
+ - [NHTURN] When reading a NetHack replay in particular, the program
+   could usefully spot the turn counter on the status line and track
+   it throughout the replay, which would permit the user to jump
+   straight to a particular turn number if you knew the turn number
+   where something interesting had happened. Probably depends on
+   [CLOPT]. However, I'm uncertain as to whether this is a sensible
+   feature to add because it's rather NH-specific: it would set a
+   precedent that adding specific support for everyone's favourite
+   application was a sensible thing to do. Perhaps better to leave
+   it as it currently is: you can jump to an arbitrary ttyrec frame
+   by its frame number, and if you need to track down a particular
+   NetHack turn number you can binary-search the available frames.
+   Alternatively, if [SEARCH] were implemented then you could just
+   search for `T:12345' (or whatever).
+
+Longer-range ideas which would involve a lot of work:
+
+ - [ABSTRACTION] Abstract the core technology away from the Curses
+   player UI, to permit non-Curses output drivers. I envisage a
+   source module which exports functions along the lines of
+   read_ttyrec_file(), sort_movie_array() and the current
+   int_for_frame(). Possibly also move some of the player logic into
+   another output-independent source module, so that things like the
+   logarithmic time compression and the rather carefully tuned
+   behaviour of the `b' key don't have to be re-implemented between
+   platforms.
+
+ - [WINPORT] A Windows GUI player, displaying in a PuTTY-like
+   terminal window, would be nice. The terminal output code might be
+   able to steal a lot from PuTTY again (in particular, it would be
+   nice to take _enough_ code from PuTTY that copy-and-pasting from
+   a replay window was still supported). This would involve
+   considerable GUI work: Windows users would probably expect
+   friendly drop-down File/Edit menus and a GUI toolbar showing the
+   contents of the OSD, and would be a bit miffed to find an exact
+   Windows clone of the current Curses keyboard-and-command-line
+   interface. Depends on [ABSTRACTION].
+
+ - [SEARCH] Searching the recording for particular text on the
+   screen might be an interesting feature, so you could easily find
+   where in a NetHack game you (say) picked up a particular object
+   or acquired some useful intrinsic. It's clearly better to search
+   the processed movie than the input data, since curses screen
+   update optimisations might prevent your text appearing in full in
+   the latter.

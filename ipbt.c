@@ -1,12 +1,3 @@
-/*
- * TODO:
- * 
- *  - cmdline: specify terminal size?
- *  - cmdline: control frame time between ttyrec files?
- *  - cmdline: cap maximum frame time?
- *  - player: h for a help screen would be nice
- */
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -888,6 +879,10 @@ int main(int argc, char **argv)
 		inst->number = 0;
 	    } else if (c == 'g') {
 		f = inst->number;
+		inst->number = 0;
+		changed = TRUE;
+	    } else if (c == 'G') {
+		f = inst->frames - 1 - inst->number;
 		inst->number = 0;
 		changed = TRUE;
 	    } else if (c == ' ') {

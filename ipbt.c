@@ -153,6 +153,16 @@ struct movie {
     int data;
 };
 
+#define NODEFAULT -1
+#define TTYREC 0
+#define NHRECORDER 1
+#define NTYPES 2
+static const char *const typenames[] = { "ttyrec", "nh-recorder" };
+struct filename {
+    char *name;
+    int type;
+};
+
 struct inst {
     Terminal *term;
     struct unicode_data ucsdata;
@@ -162,6 +172,9 @@ struct inst {
     int movielen, moviesize;
     int frames;
     unsigned long long movietime;
+
+    struct filename *filenames;
+    int nfiles, filesize;
 
     int cpairs[(FGBG >> FGSHIFT) + 1];
     int pairsused, nines;
@@ -196,7 +209,9 @@ struct inst {
 #define CURSOR (inst->w * inst->h)
 #define TIMETOP (inst->w * inst->h + 1)
 #define TIMEBOT (inst->w * inst->h + 2)
-#define TOTAL (inst->w * inst->h + 3)
+#define FILENO (inst->w * inst->h + 3)
+#define OFFSET (inst->w * inst->h + 4)
+#define TOTAL (inst->w * inst->h + 5)
 
 void sys_cursor(void *frontend, int x, int y)
 {
@@ -253,7 +268,8 @@ void free_ctx(Context ctx)
 {
 }
 
-void store_frame(struct inst *inst, unsigned long long delay)
+void store_frame(struct inst *inst, unsigned long long delay,
+		 int fileno, long fileoff)
 {
     int i, n;
 
@@ -274,6 +290,9 @@ void store_frame(struct inst *inst, unsigned long long delay)
     inst->screen[TIMETOP] = (unsigned long long)inst->movietime >> 32;
     inst->screen[TIMEBOT] = (unsigned long long)inst->movietime & 0xFFFFFFFF;
 
+    inst->screen[FILENO] = fileno;
+    inst->screen[OFFSET] = fileoff;
+
     n = 0;
     for (i = 0; i < inst->screenlen; i++) {
 	/*
@@ -291,7 +310,7 @@ void store_frame(struct inst *inst, unsigned long long delay)
 	inst->movie = sresize(inst->movie, inst->moviesize, struct movie);
     }
 
-     for (i = 0; i < inst->screenlen; i++) {
+    for (i = 0; i < inst->screenlen; i++) {
 	if (inst->screen[i] != inst->oldscreen[i]) {
 	    inst->movie[inst->movielen].frame = inst->frames - 1;
 	    inst->movie[inst->movielen].index = i;
@@ -342,6 +361,8 @@ void start_player(struct inst *inst)
 
 void end_player(struct inst *inst)
 {
+    int my, mx;
+
     if (!curses_active)
 	return;
     endwin();
@@ -623,8 +644,14 @@ int main(int argc, char **argv)
 {
     struct inst tinst, *inst = &tinst;
     char *pname;
-    int i;
+    int i, totalsize;
+    time_t start, sortstart, end;
+    int doing_opts;
+    int iw, ih, startframe;
+    int deftype = NODEFAULT;
     /* FILE *debugfp = fopen("/home/simon/.f", "w"); setvbuf(debugfp, NULL, _IONBF, 0); */
+
+    pname = argv[0];
 
     do_defaults(NULL, &inst->cfg);
     strcpy(inst->cfg.line_codepage, "");   /* disable UCS */
@@ -644,8 +671,137 @@ int main(int argc, char **argv)
 	    inst->ucsdata.unitab_xterm[i] = inst->ucsdata.unitab_line[i];
     }
 
-    inst->w = 80;
-    inst->h = 24;
+    inst->filenames = NULL;
+    inst->nfiles = inst->filesize = 0;
+
+    doing_opts = TRUE;
+    iw = 80;
+    ih = 24;
+    while (--argc) {
+	char *p = *++argv;
+	if (doing_opts && *p == '-') {
+	    char optbuf[3], *optstr, *optval;
+	    int optchr;
+
+	    /*
+	     * Special case "--" inhibits further option
+	     * processing.
+	     */
+	    if (!strcmp(p, "--")) {
+		doing_opts = FALSE;
+		continue;
+	    }
+
+	    /*
+	     * All other "--" long options are translated into
+	     * short ones.
+	     */
+	    if (p[1] == '-') {
+		optval = strchr(p, '=');
+		if (optval)
+		    *optval++ = '\0';
+		optstr = p;
+		p += 2;
+		if (!strcmp(p, "width"))
+		    optchr = 'w';
+		else if (!strcmp(p, "height"))
+		    optchr = 'h';
+		else if (!strcmp(p, "frame"))
+		    optchr = 'f';
+		else if (!strcmp(p, "ttyrec"))
+		    optchr = 'T';
+		else if (!strcmp(p, "nhrecorder") ||
+			 !strcmp(p, "nh-recorder") ||
+			 !strcmp(p, "nh_recorder") ||
+			 !strcmp(p, "nhrecording") ||
+			 !strcmp(p, "nh-recording") ||
+			 !strcmp(p, "nh_recording"))
+		    optchr = 'N';
+		else
+		    optchr = '\1';     /* definitely not defined */
+	    } else {
+		optbuf[0] = '-';
+		optbuf[1] = optchr = p[1];
+		optbuf[2] = '\0';
+		optstr = optbuf;
+		if (p[2])
+		    optval = p+2;
+		else
+		    optval = NULL;
+	    }
+
+	    switch (optchr) {
+	      case 'w':
+	      case 'h':
+	      case 'f':
+		/*
+		 * these options all require an argument
+		 */
+		if (!optval) {
+		    if (--argc)
+			optval = *++argv;
+		    else {
+			fprintf(stderr, "%s: option '%s' expects an"
+				" argument\n", pname, optstr);
+			return 1;
+		    }
+		}
+		break;
+	    }
+
+	    switch (optchr) {
+	      case 'w':
+		assert(optval);
+		iw = atoi(optval);
+		if (iw <= 0) {
+		    fprintf(stderr, "%s: argument to '%s' must be positive\n",
+			    pname, optstr);
+		    return 1;
+		}
+		break;
+	      case 'h':
+		assert(optval);
+		ih = atoi(optval);
+		if (ih <= 0) {
+		    fprintf(stderr, "%s: argument to '%s' must be positive\n",
+			    pname, optstr);
+		    return 1;
+		}
+		break;
+	      case 'f':
+		assert(optval);
+		startframe = atoi(optval);
+		if (startframe < 0) {
+		    fprintf(stderr, "%s: argument to '%s' must be"
+			    " non-negative\n", pname, optstr);
+		    return 1;
+		}
+		break;
+	      case 'T':
+		deftype = TTYREC;
+		break;
+	      case 'N':
+		deftype = NHRECORDER;
+		break;
+	      default:
+		fprintf(stderr, "%s: unrecognised option '%s'\n",
+			pname, optstr);
+		return 1;
+	    }
+	} else {
+	    if (inst->nfiles >= inst->filesize) {
+		inst->filesize = inst->nfiles + 32;
+		inst->filenames = sresize(inst->filenames, inst->filesize,
+					  struct filename);
+	    }
+	    inst->filenames[inst->nfiles].name = dupstr(p);
+	    inst->filenames[inst->nfiles].type = deftype;
+	    inst->nfiles++;
+	}
+    }
+
+    inst->w = iw;
+    inst->h = ih;
 
     inst->screenlen = TOTAL;
     inst->screen = snewn(inst->screenlen, unsigned int);
@@ -663,39 +819,151 @@ int main(int argc, char **argv)
 
     term_pwron(inst->term);
 
-    /*
-     * Read the ttyrec file(s) supplied on input.
-     */
-    pname = argv[0];
-    while (--argc) {
-	char *p = *++argv;
+    start = time(NULL);
+    totalsize = 0;
 
-	if (*p == '-') {
-	    fprintf(stderr, "%s: unrecognised command-line option '%s'\n",
-		    pname, p);
+    for (i = 0; i < inst->nfiles; i++) {
+	char *p = inst->filenames[i].name;
+	FILE *fp;
+	unsigned char hdrbuf[12];
+	unsigned char nhrbuf[4096];
+	char *termdata = NULL;
+	int termdatasize = 0, termdatalen, ret, nframes = 0;
+	unsigned long long timestamp, oldtimestamp = 0LL;
+	unsigned long long frametime, totaltime = 0LL;
+	int typemask, type, nhrstate;
+	long fileoff, filelen;
+
+	fp = fopen(p, "rb");
+	if (!fp) {
+	    fprintf(stderr, "%s: unable to open '%s': %s\n",
+		    pname, p, strerror(errno));
 	    return 1;
-	} else {
-	    FILE *fp;
-	    unsigned char hdrbuf[12];
-	    char *termdata = NULL;
-	    int termdatasize = 0, termdatalen, ret, nframes = 0;
-	    unsigned long long timestamp, oldtimestamp = 0LL;
-	    unsigned long long frametime, totaltime = 0LL;
+	}
 
-	    fp = fopen(p, "rb");
-	    if (!fp) {
-		fprintf(stderr, "%s: unable to open '%s': %s\n",
-			pname, p, strerror(errno));
-		return 1;
+	if (deftype == NODEFAULT) {
+	    /*
+	     * First pass: try to identify the file type. We do
+	     * this by looking through the entire file to see which
+	     * formats it satisfies.
+	     */
+	    typemask = 0;
+	    oldtimestamp = 0;
+	    fseek(fp, 0, SEEK_END);
+	    filelen = ftell(fp);
+	    rewind(fp);
+	    while (1) {
+		/*
+		 * Try to parse the file as a ttyrec.
+		 */
+		long offset, newoffset;
+
+		ret = fread(hdrbuf, 1, 12, fp);
+		if (ret == 0) {
+		    typemask |= 1 << TTYREC;
+		    break;
+		} else if (ret != 12) {
+		    break;
+		}
+
+		timestamp = GET_32BIT_LSB_FIRST(hdrbuf);
+		timestamp = timestamp*1000000 + GET_32BIT_LSB_FIRST(hdrbuf+4);
+		if (timestamp < oldtimestamp)
+		    break;
+		oldtimestamp = timestamp;
+
+		termdatalen = GET_32BIT_LSB_FIRST(hdrbuf + 8);
+		offset = ftell(fp);
+		ret = fseek(fp, termdatalen, SEEK_CUR);
+		if (ret < 0)
+		    break;
+		newoffset = ftell(fp);
+		if (newoffset != offset + termdatalen ||
+		    newoffset < 0 || newoffset > filelen)
+		    break;
 	    }
+	    rewind(fp);
 
-	    term_pwron(inst->term);
+	    oldtimestamp = timestamp = 0;
+	    nhrstate = 0;
+	    while (1) {
+		/*
+		 * Try to parse the file as a nh-recording.
+		 */
+		int i;
 
-	    printf("Reading %s...", p);
-	    fflush(stdout);
+		ret = fread(nhrbuf, 1, 4096, fp);
+		if (ret == 0) {
+		    if (nhrstate == 0 || nhrstate == 1)
+			typemask |= 1 << NHRECORDER;
+		    break;
+		}
+		for (i = 0; i < ret; i++) {
+		    switch (nhrstate) {
+		      case 0:
+			if (nhrbuf[i] == 0) {
+			    nhrstate = 1;
+			    timestamp = 0;
+			}
+			break;
+		      case 1:
+			timestamp |= (unsigned char)nhrbuf[i];
+			nhrstate = 2;
+			break;
+		      case 2:
+			timestamp |= (unsigned char)nhrbuf[i] << 8;
+			nhrstate = 3;
+			break;
+		      case 3:
+			timestamp |= (unsigned char)nhrbuf[i] << 16;
+			nhrstate = 4;
+			break;
+		      case 4:
+			timestamp |= (unsigned char)nhrbuf[i] << 24;
+			nhrstate = 0;
+			if (oldtimestamp > timestamp)
+			    goto done_nhr_loop;   /* goto as multi-level break */
+			oldtimestamp = timestamp;
+			break;
+		    }
+		}
+	    } done_nhr_loop:
+	    rewind(fp);
 
+	    if (!typemask) {
+		/*
+		 * No file type matched.
+		 */
+		fprintf(stderr, "%s: '%s' is not a valid input file\n",
+			pname, p);
+		return 1;
+	    } else {
+		for (type = 0; type < NTYPES; type++)
+		    if (typemask & (1 << type))
+			break;
+		assert(type < NTYPES);
+
+		if (typemask & (typemask-1)) {   /* test for power of two */
+		    /*
+		     * More than one file type matched.
+		     */
+		    printf("%s matched more than one file type, assuming %s\n",
+			   p, typenames[type]);
+		}
+	    }
+	} else
+	    type = deftype;
+
+	term_pwron(inst->term);
+
+	printf("Reading %s (%s) ... ", p, typenames[type]);
+	fflush(stdout);
+
+	switch (type) {
+	  case TTYREC:
 	    while (1) {
 		ret = fread(hdrbuf, 1, 12, fp);
+		fileoff = ftell(fp);
 		if (ret == 0) {
 		    break;
 		} else if (ret < 0) {
@@ -727,6 +995,8 @@ int main(int argc, char **argv)
 		    return 1;
 		}
 
+		totalsize += 12 + termdatalen;
+
 		timestamp = GET_32BIT_LSB_FIRST(hdrbuf);
 		timestamp = timestamp*1000000 + GET_32BIT_LSB_FIRST(hdrbuf+4);
 		if (oldtimestamp)
@@ -736,35 +1006,96 @@ int main(int argc, char **argv)
 		oldtimestamp = timestamp;
 
 		term_data(inst->term, FALSE, termdata, termdatalen);
-		store_frame(inst, frametime);
+		store_frame(inst, frametime, i, fileoff);
 
 		nframes++;
 		totaltime += frametime;
 	    }
+	    break;
+	  case NHRECORDER:
+	    fileoff = 0;
+	    frametime = (inst->movietime == 0 ? 0 : 1000000);
+	    oldtimestamp = 0;
+	    while (1) {
+		int i;
+		long thisoff = ftell(fp);
 
-	    sfree(termdata);
+		ret = fread(nhrbuf, 1, 4096, fp);
+		if (ret == 0)
+		    break;
 
-	    printf("%d frames, %g seconds\n", nframes, totaltime / 1000000.0);
+		for (i = 0; i < ret; i++) {
+		    switch (nhrstate) {
+		      case 0:
+			if (nhrbuf[i] == 0) {
+			    nhrstate = 1;
+			    timestamp = 0;
+			} else {
+			    term_data(inst->term, FALSE, nhrbuf+i, 1);
+			}
+			break;
+		      case 1:
+			timestamp |= (unsigned char)nhrbuf[i];
+			nhrstate = 2;
+			break;
+		      case 2:
+			timestamp |= (unsigned char)nhrbuf[i] << 8;
+			nhrstate = 3;
+			break;
+		      case 3:
+			timestamp |= (unsigned char)nhrbuf[i] << 16;
+			nhrstate = 4;
+			break;
+		      case 4:
+			timestamp |= (unsigned char)nhrbuf[i] << 24;
+			nhrstate = 0;
 
-	    fclose(fp);
+			store_frame(inst, frametime, i, fileoff);
+			nframes++;
+			totaltime += frametime;
+
+			frametime = (timestamp - oldtimestamp) * 10000;
+			oldtimestamp = timestamp;
+
+			fileoff = thisoff + i + 1;
+			break;
+		    }
+		}
+	    }
+	    break;
 	}
+
+	sfree(termdata);
+
+	printf("%d frames\n", nframes);
+
+	fclose(fp);
     }
 
     if (!inst->frames) {
-	fprintf(stderr, "usage: %s <ttyrec> [<ttyrec...]\n", pname);
+	fprintf(stderr, "usage: %s <file> [<file...]\n", pname);
 	return 0;
     }
 
-    printf("Total %d frames, %g seconds, %d bytes of memory used\n",
-	   inst->frames, inst->movietime / 1000000.0,
-	   inst->movielen * sizeof(struct movie));
+    sortstart = time(NULL);
+
+    printf("Total %d frames, %d bytes of memory used\n",
+	   inst->frames, inst->movielen * sizeof(struct movie));
+    printf("Total loading time: %d seconds (%.3g sec/Mb)\n",
+	   (int)difftime(sortstart, start),
+	   difftime(sortstart, start) * 1048576 / totalsize);
 
     qsort(inst->movie, inst->movielen, sizeof(struct movie), moviecmp);
 
     printf("Sorted and ready to go.\n");
 
+    end = time(NULL);
+    printf("Total loading and preparation time: %d seconds (%.3g sec/Mb)\n",
+	   (int)difftime(end, start),
+	   difftime(end, start) * 1048576 / totalsize);
+
     {
-	int f = 0, fb = -1;
+	int f = startframe, fb = -1;
 	long long t = -1;
 	long long tsince = 0;
 	int changed = TRUE;

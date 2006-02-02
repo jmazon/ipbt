@@ -1,0 +1,38 @@
+#!/usr/bin/perl 
+
+# Search a ttyrec file for text matching a regexp. Print the frame
+# number(s) in which it's found, so that ipbt can be used to go
+# straight there.
+
+if (!defined $ARGV[1]) {
+    print STDERR "usage: ttygrep <pattern> <file> [<file>...]\n";
+    # If called with no arguments, we assume we're being _asked_ to
+    # print the usage statement, so we do so and exit with no
+    # error. If called with one argument, we have no remaining
+    # choice but to assume the user is mistaken.
+    exit (defined $ARGV[0]);
+}
+
+$pattern = shift @ARGV;
+
+foreach $file (@ARGV) {
+    open F, "<$file" or die "$0: unable to open '$file'\n";
+
+    $frame = 0;
+
+    while (1) {
+	$hdr = "";
+	$hgot = read F, $hdr, 12;
+	last if $hgot == 0; # clean EOF
+	die "$0: unexpected EOF in '$file' frame header\n" if $hgot < 12;
+	@hdrvals = unpack "VVV", $hdr;
+	$dlen = $hdrvals[2];
+	$data = "";
+	$dgot = read F, $data, $dlen;
+	die "$0: unexpected EOF in '$file' frame data\n" if $dgot < $dlen;
+	print "$file:$frame:$&\n" if $data =~ /[ -~]*$pattern[ -~]*/s;
+	$frame++;
+    }
+
+    close F;
+}

@@ -1,5 +1,5 @@
 .c.o:
-	$(CC) $(CFLAGS) -c $*.c
+	$(CC) $(CFLAGS) $(XFLAGS) -c $*.c
 
 IPBT = be_none.o fromucs.o ipbt.o ldiscucs.o localenc.o macenc.o mimeenc.o \
        minibidi.o misc.o noprint.o notiming.o sbcs.o sbcsdat.o settings.o \

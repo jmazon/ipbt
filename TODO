@@ -3,16 +3,21 @@ TODO/wishlist file for IPBT
 
 Things I'd definitely like to see done:
 
- - [CLOPT] Add a framework for supporting command-line options.
-
- - [INSIZE] Currently the internal terminal emulator's screen size
-   is fixed at 80x24. It should be configurable via command-line
-   options. Depends on [CLOPT].
+ - [RESUME] Make it easy to resume playback of the same set of
+   ttyrecs at another time, by means of printing out on exit the
+   actual command line which would load the same files and resume
+   the playback at the same place. (Perhaps command-line options to
+   restore the same speed settings would improve functionality in
+   this area and be generally useful too. Also we should output
+   appropriate width and height options. And probably Bourne-shell-
+   quote the filenames in the output command line. And supply enough
+   -N/-T options. Generally a pain, in fact, but useful.)
 
  - [HELP] In the player, the user should be able to press `h' or `?'
    (probably both) for a help screen. Currently the available
-   keypresses are completely undocumented other than by reading the
-   source.
+   keypresses are only documented in README.
+
+ - [MAN] Man page.
 
  - [UXPORT] Unix portability work. There ought to be an autoconf
    framework, and any dependencies on ncurses rather than vanilla
@@ -36,8 +41,7 @@ Things I haven't quite decided whether I want yet:
    input command line, ttyrec assumes a one-second delay between the
    final frame of one and the initial frame of the next. This delay
    could easily be made configurable using a command-line option.
-   Depends on [CLOPT]. I'm not sure whether this is actually worth
-   bothering with.
+   I'm not sure whether this is actually worth bothering with.
 
  - [MMAP] It might be an interesting idea to optionally be able to
    store the internal movie data in a disk file, probably just by
@@ -50,18 +54,34 @@ Things I haven't quite decided whether I want yet:
    could usefully spot the turn counter on the status line and track
    it throughout the replay, which would permit the user to jump
    straight to a particular turn number if you knew the turn number
-   where something interesting had happened. Probably depends on
-   [CLOPT]. However, I'm uncertain as to whether this is a sensible
-   feature to add because it's rather NH-specific: it would set a
-   precedent that adding specific support for everyone's favourite
-   application was a sensible thing to do. Perhaps better to leave
-   it as it currently is: you can jump to an arbitrary ttyrec frame
-   by its frame number, and if you need to track down a particular
-   NetHack turn number you can binary-search the available frames.
-   Alternatively, if [SEARCH] were implemented then you could just
-   search for `T:12345', although this would take linear time rather
-   than the log time one could achieve by making use of the known
-   monotonicity.
+   where something interesting had happened. However, I'm uncertain
+   as to whether this is a sensible feature to add because it's
+   rather NH-specific: it would set a precedent that adding specific
+   support for everyone's favourite application was a sensible thing
+   to do. Perhaps better to leave it as it currently is: you can
+   jump to an arbitrary ttyrec frame by its frame number, and if you
+   need to track down a particular NetHack turn number you can
+   binary-search the available frames. Alternatively, if [SEARCH]
+   were implemented then you could just search for `T:12345',
+   although this would take linear time rather than the log time one
+   could achieve by making use of the known monotonicity.
+
+ - [SAVEFILE] Save the movie data to a file once processed and
+   sorted. If one is planning to watch a very long replay in many
+   stages, this would allow the tedious preparation stage to be done
+   only once. Ties in to [RESUME], if implemented: the resume
+   command line would want to specify the output movie file rather
+   than the inputs. Downside is that there would be confusing
+   portability concerns about the movie file itself; carefully
+   making sure of its cross-platform portability would slow down
+   lookups in it, but conversely I predict that if I _don't_ make it
+   a well-defined portable format then Murphy's Law says people will
+   probably try to use it as an interchange format and complain when
+   it doesn't work...
+    + well, a simple answer to this is to start the file off with a
+      dummy movie record containing known data, make sure we can
+      load it in correctly, and give a reasonably informative error
+      message if not.
 
 Longer-range ideas which would involve a lot of work:
 
@@ -92,7 +112,9 @@ Longer-range ideas which would involve a lot of work:
    or acquired some useful intrinsic. It's clearly better to search
    the processed movie than the input data, since curses screen
    update optimisations might prevent your text appearing in full in
-   the latter.
+   the latter. `ttygrep' is a decent stopgap measure in the absence
+   of this feature, since most of NetHack's status line messages
+   seem to be printed in one go so it's adequate for finding those.
 
  - [BGLOAD] The current movie data structure is simple and robust,
    but it does have the nasty downside of an annoying wait when

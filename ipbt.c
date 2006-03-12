@@ -649,6 +649,7 @@ int main(int argc, char **argv)
     int doing_opts;
     int iw, ih, startframe;
     int deftype = NODEFAULT;
+    int prepareonly = FALSE;
     /* FILE *debugfp = fopen("/home/simon/.f", "w"); setvbuf(debugfp, NULL, _IONBF, 0); */
 
     pname = argv[0];
@@ -710,6 +711,8 @@ int main(int argc, char **argv)
 		    optchr = 'f';
 		else if (!strcmp(p, "ttyrec"))
 		    optchr = 'T';
+		else if (!strcmp(p, "prepare-only"))
+		    optchr = 'P';
 		else if (!strcmp(p, "nhrecorder") ||
 			 !strcmp(p, "nh-recorder") ||
 			 !strcmp(p, "nh_recorder") ||
@@ -782,6 +785,9 @@ int main(int argc, char **argv)
 		break;
 	      case 'N':
 		deftype = NHRECORDER;
+		break;
+	      case 'P':
+		prepareonly = TRUE;
 		break;
 	      default:
 		fprintf(stderr, "%s: unrecognised option '%s'\n",
@@ -1024,6 +1030,8 @@ int main(int argc, char **argv)
 		if (ret == 0)
 		    break;
 
+		totalsize += ret;
+
 		for (i = 0; i < ret; i++) {
 		    switch (nhrstate) {
 		      case 0:
@@ -1093,6 +1101,11 @@ int main(int argc, char **argv)
     printf("Total loading and preparation time: %d seconds (%.3g sec/Mb)\n",
 	   (int)difftime(end, start),
 	   difftime(end, start) * 1048576 / totalsize);
+
+    if (prepareonly) {
+	printf("Not starting player due to -P option.\n");
+	return 0;
+    }
 
     {
 	int f = startframe, fb = -1;

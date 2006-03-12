@@ -50,3 +50,4 @@ sbcsdat.c: sbcsgen.pl sbcs.dat
 
 clean:
 	rm -f *.o ipbt sbcsdat.c
+	rm -f *.da *.bbg *.bb *.gcov gmon.out

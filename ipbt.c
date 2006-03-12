@@ -84,7 +84,8 @@ void set_title(void *frontend, char *title) {}
 void set_icon(void *frontend, char *title) {}
 void set_sbar(void *frontend, int total, int start, int page) {}
 void get_clip(void *frontend, wchar_t ** p, int *len) { *p = NULL; *len = 0; }
-void write_clip(void *frontend, wchar_t * data, int len, int must_deselect) {}
+void write_clip(void *frontend, wchar_t * data, int *attr, int len,
+		int must_deselect) {}
 void request_paste(void *frontend) {}
 void request_resize(void *frontend, int w, int h) {}
 void palette_reset(void *frontend) {}
@@ -823,7 +824,7 @@ int main(int argc, char **argv)
     inst->movietime = 0LL;
     inst->frames = 0;
 
-    term_pwron(inst->term);
+    term_pwron(inst->term, TRUE);
 
     start = time(NULL);
     totalsize = 0;
@@ -960,7 +961,7 @@ int main(int argc, char **argv)
 	} else
 	    type = deftype;
 
-	term_pwron(inst->term);
+	term_pwron(inst->term, TRUE);
 
 	printf("Reading %s (%s) ... ", p, typenames[type]);
 	fflush(stdout);

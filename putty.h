@@ -70,8 +70,10 @@ typedef struct terminal_tag Terminal;
 #define LATTR_TOP    0x00000002UL
 #define LATTR_BOT    0x00000003UL
 #define LATTR_MODE   0x00000003UL
-#define LATTR_WRAPPED 0x00000010UL
-#define LATTR_WRAPPED2 0x00000020UL
+#define LATTR_WRAPPED 0x00000010UL     /* this line wraps to next */
+#define LATTR_WRAPPED2 0x00000020UL    /* with WRAPPED: CJK wide character
+					  wrapped to next line, so last
+					  single-width cell is empty */
 
 #define ATTR_INVALID 0x03FFFFU
 
@@ -324,6 +326,10 @@ enum {
     FUNKY_SCO
 };
 
+enum {
+    FQ_DEFAULT, FQ_ANTIALIASED, FQ_NONANTIALIASED, FQ_CLEARTYPE
+};
+
 extern const char *const ttymodes[];
 
 enum {
@@ -428,6 +434,7 @@ struct config_tag {
     int ssh_kexlist[KEX_MAX];
     int ssh_rekey_time;		       /* in minutes */
     char ssh_rekey_data[16];
+    int tryagent;
     int agentfwd;
     int change_username;	       /* allow username switching in SSH-2 */
     int ssh_cipherlist[CIPHER_MAX];
@@ -502,6 +509,7 @@ struct config_tag {
     int win_name_always;
     int width, height;
     FontSpec font;
+    int font_quality;
     Filename logfilename;
     int logtype;
     int logxfovr;
@@ -675,7 +683,7 @@ void free_ctx(Context);
 void palette_set(void *frontend, int, int, int, int);
 void palette_reset(void *frontend);
 void write_aclip(void *frontend, char *, int, int);
-void write_clip(void *frontend, wchar_t *, int, int);
+void write_clip(void *frontend, wchar_t *, int *, int, int);
 void get_clip(void *frontend, wchar_t **, int *);
 void optimised_move(void *frontend, int, int, int);
 void set_raw_mouse_mode(void *frontend, int);
@@ -779,7 +787,7 @@ void term_free(Terminal *);
 void term_size(Terminal *, int, int, int);
 void term_paint(Terminal *, Context, int, int, int, int, int);
 void term_scroll(Terminal *, int, int);
-void term_pwron(Terminal *);
+void term_pwron(Terminal *, int);
 void term_clrsb(Terminal *);
 void term_mouse(Terminal *, Mouse_Button, Mouse_Button, Mouse_Action,
 		int,int,int,int,int);

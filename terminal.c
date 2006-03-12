@@ -94,10 +94,12 @@ static termline *lineptr(Terminal *, int, int, int);
 static void unlineptr(termline *);
 static void do_paint(Terminal *, Context, int);
 static void erase_lots(Terminal *, int, int, int);
+static int find_last_nonempty_line(Terminal *, tree234 *);
 static void swap_screen(Terminal *, int, int, int);
 static void update_sbar(Terminal *);
 static void deselect(Terminal *);
 static void term_print_finish(Terminal *);
+static void scroll(Terminal *, int, int, int, int);
 #ifdef OPTIMISE_SCROLL
 static void scroll_display(Terminal *, int, int, int);
 #endif /* OPTIMISE_SCROLL */
@@ -1170,10 +1172,12 @@ static void term_schedule_vbell(Terminal *term, int already_started,
 
 /*
  * Set up power-on settings for the terminal.
+ * If 'clear' is false, don't actually clear the primary screen, and
+ * position the cursor below the last non-blank line (scrolling if
+ * necessary).
  */
-static void power_on(Terminal *term)
+static void power_on(Terminal *term, int clear)
 {
-    term->curs.x = term->curs.y = 0;
     term->alt_x = term->alt_y = 0;
     term->savecurs.x = term->savecurs.y = 0;
     term->alt_t = term->marg_t = 0;
@@ -1217,8 +1221,17 @@ static void power_on(Terminal *term)
 	swap_screen(term, 1, FALSE, FALSE);
 	erase_lots(term, FALSE, TRUE, TRUE);
 	swap_screen(term, 0, FALSE, FALSE);
-	erase_lots(term, FALSE, TRUE, TRUE);
+	if (clear)
+	    erase_lots(term, FALSE, TRUE, TRUE);
+	term->curs.y = find_last_nonempty_line(term, term->screen) + 1;
+	if (term->curs.y == term->rows) {
+	    term->curs.y--;
+	    scroll(term, 0, term->rows - 1, 1, TRUE);
+	}
+    } else {
+	term->curs.y = 0;
     }
+    term->curs.x = 0;
     term_schedule_tblink(term);
     term_schedule_cblink(term);
 }
@@ -1283,9 +1296,9 @@ void term_seen_key_event(Terminal *term)
 /*
  * Same as power_on(), but an external function.
  */
-void term_pwron(Terminal *term)
+void term_pwron(Terminal *term, int clear)
 {
-    power_on(term);
+    power_on(term, clear);
     if (term->ldisc)		       /* cause ldisc to notice changes */
 	ldisc_send(term->ldisc, NULL, 0, 0);
     term->disptop = 0;
@@ -1384,7 +1397,7 @@ void term_reconfig(Terminal *term, Config *cfg)
  */
 void term_clrsb(Terminal *term)
 {
-    termline *line;
+    unsigned char *line;
     term->disptop = 0;
     while ((line = delpos234(term->scrollback, 0)) != NULL) {
 	sfree(line);            /* this is compressed data, not a termline */
@@ -1442,7 +1455,7 @@ Terminal *term_init(Config *mycfg, struct unicode_data *ucsdata,
     term->tabs = NULL;
     deselect(term);
     term->rows = term->cols = -1;
-    power_on(term);
+    power_on(term, TRUE);
     term->beephead = term->beeptail = NULL;
 #ifdef OPTIMISE_SCROLL
     term->scrollhead = term->scrolltail = NULL;
@@ -1534,6 +1547,11 @@ void term_size(Terminal *term, int newrows, int newcols, int newsavelines)
     if (newrows == term->rows && newcols == term->cols &&
 	newsavelines == term->savelines)
 	return;			       /* nothing to do */
+
+    /* Behave sensibly if we're given zero (or negative) rows/cols */
+
+    if (newrows < 1) newrows = 1;
+    if (newcols < 1) newcols = 1;
 
     deselect(term);
     swap_screen(term, 0, FALSE, FALSE);
@@ -3071,7 +3089,7 @@ static void term_out(Terminal *term)
 		    break;
 		  case 'c':	       /* RIS: restore power-on settings */
 		    compatibility(VT100);
-		    power_on(term);
+		    power_on(term, TRUE);
 		    if (term->ldisc)   /* cause ldisc to notice changes */
 			ldisc_send(term->ldisc, NULL, 0, 0);
 		    if (term->reset_132) {
@@ -4075,7 +4093,7 @@ static void term_out(Terminal *term)
 		break;
 	      case SEEN_OSC_P:
 		{
-		    int max = (term->osc_strlen == 0 ? 21 : 16);
+		    int max = (term->osc_strlen == 0 ? 21 : 15);
 		    int val;
 		    if ((int)c >= '0' && (int)c <= '9')
 			val = c - '0';
@@ -4804,10 +4822,12 @@ static void do_paint(Terminal *term, Context ctx, int may_optimise)
 		!= newline[j].attr) {
 		int k;
 
-		for (k = laststart; k < j; k++)
-		    term->disptext[i]->chars[k].attr |= ATTR_INVALID;
+		if (!dirtyrect) {
+		    for (k = laststart; k < j; k++)
+			term->disptext[i]->chars[k].attr |= ATTR_INVALID;
 
-		dirtyrect = TRUE;
+		    dirtyrect = TRUE;
+		}
 	    }
 
 	    if (dirtyrect)
@@ -5035,17 +5055,43 @@ void term_scroll(Terminal *term, int rel, int where)
     term_update(term);
 }
 
+/*
+ * Helper routine for clipme(): growing buffer.
+ */
+typedef struct {
+    int buflen;		    /* amount of allocated space in textbuf/attrbuf */
+    int bufpos;		    /* amount of actual data */
+    wchar_t *textbuf;	    /* buffer for copied text */
+    wchar_t *textptr;	    /* = textbuf + bufpos (current insertion point) */
+    int *attrbuf;	    /* buffer for copied attributes */
+    int *attrptr;	    /* = attrbuf + bufpos */
+} clip_workbuf;
+
+static void clip_addchar(clip_workbuf *b, wchar_t chr, int attr)
+{
+    if (b->bufpos >= b->buflen) {
+	b->buflen += 128;
+	b->textbuf = sresize(b->textbuf, b->buflen, wchar_t);
+	b->textptr = b->textbuf + b->bufpos;
+	b->attrbuf = sresize(b->attrbuf, b->buflen, int);
+	b->attrptr = b->attrbuf + b->bufpos;
+    }
+    *b->textptr++ = chr;
+    *b->attrptr++ = attr;
+    b->bufpos++;
+}
+
 static void clipme(Terminal *term, pos top, pos bottom, int rect, int desel)
 {
-    wchar_t *workbuf;
-    wchar_t *wbptr;		       /* where next char goes within workbuf */
+    clip_workbuf buf;
     int old_top_x;
-    int wblen = 0;		       /* workbuf len */
-    int buflen;			       /* amount of memory allocated to workbuf */
+    int attr;
 
-    buflen = 5120;		       /* Default size */
-    workbuf = snewn(buflen, wchar_t);
-    wbptr = workbuf;		       /* start filling here */
+    buf.buflen = 5120;			
+    buf.bufpos = 0;
+    buf.textptr = buf.textbuf = snewn(buf.buflen, wchar_t);
+    buf.attrptr = buf.attrbuf = snewn(buf.buflen, int);
+
     old_top_x = top.x;		       /* needed for rect==1 */
 
     while (poslt(top, bottom)) {
@@ -5068,7 +5114,8 @@ static void clipme(Terminal *term, pos top, pos bottom, int rect, int desel)
 	 * newline at the end)...
 	 */
 	if (!(ldata->lattr & LATTR_WRAPPED)) {
-	    while (IS_SPACE_CHR(ldata->chars[nlpos.x - 1].chr) &&
+	    while (nlpos.x &&
+		   IS_SPACE_CHR(ldata->chars[nlpos.x - 1].chr) &&
 		   !ldata->chars[nlpos.x - 1].cc_next &&
 		   poslt(top, nlpos))
 		decpos(nlpos);
@@ -5108,6 +5155,7 @@ static void clipme(Terminal *term, pos top, pos bottom, int rect, int desel)
 
 	    while (1) {
 		int uc = ldata->chars[x].chr;
+                attr = ldata->chars[x].attr;
 
 		switch (uc & CSET_MASK) {
 		  case CSET_LINEDRW:
@@ -5159,16 +5207,8 @@ static void clipme(Terminal *term, pos top, pos bottom, int rect, int desel)
 		}
 #endif
 
-		for (p = cbuf; *p; p++) {
-		    /* Enough overhead for trailing NL and nul */
-		    if (wblen >= buflen - 16) {
-			buflen += 100;
-			workbuf = sresize(workbuf, buflen, wchar_t);
-			wbptr = workbuf + wblen;
-		    }
-		    wblen++;
-		    *wbptr++ = *p;
-		}
+		for (p = cbuf; *p; p++)
+		    clip_addchar(&buf, *p, attr);
 
 		if (ldata->chars[x].cc_next)
 		    x += ldata->chars[x].cc_next;
@@ -5179,10 +5219,8 @@ static void clipme(Terminal *term, pos top, pos bottom, int rect, int desel)
 	}
 	if (nl) {
 	    int i;
-	    for (i = 0; i < sel_nl_sz; i++) {
-		wblen++;
-		*wbptr++ = sel_nl[i];
-	    }
+	    for (i = 0; i < sel_nl_sz; i++)
+		clip_addchar(&buf, sel_nl[i], 0);
 	}
 	top.y++;
 	top.x = rect ? old_top_x : 0;
@@ -5190,12 +5228,12 @@ static void clipme(Terminal *term, pos top, pos bottom, int rect, int desel)
 	unlineptr(ldata);
     }
 #if SELECTION_NUL_TERMINATED
-    wblen++;
-    *wbptr++ = 0;
+    clip_addchar(&buf, 0, 0);
 #endif
-    write_clip(term->frontend, workbuf, wblen, desel); /* transfer to clipbd */
-    if (buflen > 0)		       /* indicates we allocated this buffer */
-	sfree(workbuf);
+    /* Finally, transfer all that to the clipboard. */
+    write_clip(term->frontend, buf.textbuf, buf.attrbuf, buf.bufpos, desel);
+    sfree(buf.textbuf);
+    sfree(buf.attrbuf);
 }
 
 void term_copyall(Terminal *term)

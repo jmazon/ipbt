@@ -4,18 +4,37 @@
 # number(s) in which it's found, so that ipbt can be used to go
 # straight there.
 
-if (!defined $ARGV[1]) {
+@args = ();
+$opts = 1;
+$join = 0;
+foreach $i (@ARGV) {
+    if ($opts and $i =~ /^-(.*)/) {
+	if ($1 eq "-") {
+	    $opts = 0;
+	} elsif ($1 eq "j") {
+	    $join = 1;
+	} else {
+	    warn "unrecognised option '-$1'\n";
+	}
+    } else {
+	push @args, $i;
+    }
+}
+
+if (!defined $args[1]) {
     print STDERR "usage: ttygrep <pattern> <file> [<file>...]\n";
     # If called with no arguments, we assume we're being _asked_ to
     # print the usage statement, so we do so and exit with no
     # error. If called with one argument, we have no remaining
     # choice but to assume the user is mistaken.
-    exit (defined $ARGV[0]);
+    exit (defined $args[0]);
 }
 
-$pattern = shift @ARGV;
+$pattern = shift @args;
 
-foreach $file (@ARGV) {
+$tframe = 0;
+
+foreach $file (@args) {
     open F, "<$file" or die "$0: unable to open '$file'\n";
 
     $frame = 0;
@@ -30,8 +49,14 @@ foreach $file (@ARGV) {
 	$data = "";
 	$dgot = read F, $data, $dlen;
 	die "$0: unexpected EOF in '$file' frame data\n" if $dgot < $dlen;
-	print "$file:$frame:$&\n" if $data =~ /[ -~]*$pattern[ -~]*/s;
+	if ($join) {
+	    $location = "$tframe";
+	} else {
+	    $location = "$file:$frame";
+	}
+	print "$location:$&\n" if $data =~ /[ -~]*$pattern[ -~]*/s;
 	$frame++;
+	$tframe++;
     }
 
     close F;

@@ -1187,7 +1187,7 @@ int main(int argc, char **argv)
 	    if (c == 'q' || c == 'Q' || c == '\003')
 		break;
 
-	    if (c == 'b') {
+	    if (c == 'b' || c == '<') {
 		/*
 		 * When moving backwards, we move relative to the
 		 * last frame we moved backwards _to_ rather than
@@ -1206,10 +1206,10 @@ int main(int argc, char **argv)
 		changed = TRUE;
 	    } else if (c >= '0' && c <= '9') {
 		inst->number = inst->number * 10 + (c - '0');
-	    } else if (c == 'o') {
+	    } else if (c == 'o' || c == 'O') {
 		inst->osd = !inst->osd;
 		inst->number = 0;
-	    } else if (c == 'L') {
+	    } else if (c == 'l' || c == 'L') {
 		inst->logmod = !inst->logmod;
 		inst->number = 0;
 	    } else if (c == 'x') {
@@ -1230,14 +1230,14 @@ int main(int argc, char **argv)
 		f = inst->frames - 1 - inst->number;
 		inst->number = 0;
 		changed = TRUE;
-	    } else if (c == ' ') {
+	    } else if (c == ' ' || c == '>') {
 		f += (inst->number ? inst->number : 1);
 		inst->number = 0;
 		changed = TRUE;
 	    } else if (c == -1 && inst->playing) {
 		f++;
 		changed = TRUE;
-	    } else if (c == 'p' || c == 's') {
+	    } else if (c == 'p' || c == 'P' || c == 's' || c == 'S') {
 		inst->playing = !inst->playing;
 		if (inst->playing && f+1 < inst->frames)
 		    f++;

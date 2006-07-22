@@ -116,20 +116,11 @@ Longer-range ideas which would involve a lot of work:
    of this feature, since most of NetHack's status line messages
    seem to be printed in one go so it's adequate for finding those.
 
- - [BGLOAD] The current movie data structure is simple and robust,
-   but it does have the nasty downside of an annoying wait when
-   loading the ttyrec to begin with. One possibility is to replace
-   the large array of movie records with a B-tree (high-degree to
-   minimise the memory overhead; we'd also want to ensure the B-tree
-   implementation supported the optimisation of not storing null
-   child pointers in the leaf nodes), so that the movie array was
-   built up in the correct retrieval order rather than requiring a
-   single monolithic sort operation during setup. This would permit
-   the player to start up instantly, and the rest of the file could
-   be read in the background while processing keypresses. There
-   would still be an unavoidable delay if the user wanted to go
-   straight to the end of the file or jump to a frame that wasn't
-   loaded yet, but it might be an improvement on the current
-   mechanism. On the other hand, the complexity of
-   background-loading the file might be prohibitive: it might
-   require multithreading to do properly, for example.
+ - [BGLOAD] Have a mode in which the player starts up instantly, and
+   the rest of the file(s) are read in the background while
+   processing keypresses. There would still be an unavoidable delay
+   if the user wanted to go straight to the end of the file or jump
+   to a frame that wasn't loaded yet, but it might be an improvement
+   on the current non-negotiable delay. On the other hand, the
+   complexity of background-loading the file might be prohibitive:
+   it might require multithreading to do properly, for example.

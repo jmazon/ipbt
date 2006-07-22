@@ -31,9 +31,7 @@ number and move backwards as well as forwards.
 The downside is that ipbt takes time to read the entire input file
 before starting. I've been testing it on an 8Mb ttyrec of a NetHack
 ascension; on a 1GHz Pentium III it takes about a minute to read the
-file, and a further twenty seconds to rearrange the movie array from
-writing order into reading order. After that setup phase, however,
-playback is efficient.
+file. After that setup phase, however, playback is efficient.
 
 Current status of ipbt:
  * Basically works.

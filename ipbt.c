@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <math.h>
+#include <limits.h>
 
 #include <ncurses.h>
 
@@ -148,12 +149,6 @@ int default_port = -1, default_protocol = -1;
 #define BGSHIFT 20
 #define FGBGSHIFT FGSHIFT
 
-struct movie {
-    int frame;
-    int index;
-    int data;
-};
-
 #define NODEFAULT -1
 #define TTYREC 0
 #define NHRECORDER 1
@@ -164,13 +159,14 @@ struct filename {
     int type;
 };
 
+struct parray;
+
 struct inst {
     Terminal *term;
     struct unicode_data ucsdata;
     Config cfg;
     int *screen, *oldscreen, w, h, screenlen;
-    struct movie *movie;
-    int movielen, moviesize;
+    struct parray **parrays;
     int frames;
     unsigned long long movietime;
 
@@ -193,19 +189,229 @@ struct inst {
  * This rather simplistic and flat architecture is because a lot of
  * the time we won't be directly storing these. Instead, we'll be
  * storing a list of how each integer changed over time. Our
- * _movie_ data structure will be a sequence of records of the form
- * (frame number, which integer changed, what did it change to). We
- * initially build this structure up in order of frame (because
- * we're reading through the file from the start); then we sort it
- * so that it's indexed primarily by integer, which means that we
- * can determine the value of integer I at frame F by a binary
- * search of the array. This enables us to play back and forth
- * through the entire movie with arbitrary rewind. Hence the need
- * to have the entire terminal state encoded as an unstructured
- * list of integers: if I had to give separate treatment to the
- * cursor position and any other future enhancements such as line
- * attributes, it would all get more complicated.
+ * _movie_ data structure will be a collection of pseudo-`arrays',
+ * one for each of the integers in our screen array, containing
+ * elements of the form (frame number in which the integer changed,
+ * what it changed to). This means that we can determine the value
+ * of integer I at frame F by a binary search of the array. This
+ * enables us to play back and forth through the entire movie with
+ * arbitrary rewind. Hence the need to have the entire terminal
+ * state encoded as an unstructured list of integers: if I had to
+ * give separate treatment to the cursor position and any other
+ * future enhancements such as line attributes, it would all get
+ * more complicated.
+ * 
+ * To prevent memory wastage by repeatedly reallocing several
+ * actual arrays, we instead use the concept of a `pseudo-array',
+ * which is structured much like an ext2fs file: initially the
+ * array is a single block of memory in the obvious format, but
+ * once it overflows that block we move to a two-layer structure
+ * containing an index block with (frame, sub-block) records each
+ * indexing a block of real array. When the index block overflows,
+ * we move to a three-layer structure with a second-level index
+ * block indexing the first-level ones, and so on.
  */
+
+struct parray_block;
+
+struct parray_level0 {
+    int frame;
+    int data;
+};
+
+struct parray_level1 {
+    int frame;
+    struct parray_block *subblock;
+};
+
+#ifdef PARRAY_TEST
+#define PARRAY_L0COUNT 5
+#define PARRAY_L1COUNT 3
+#else
+#define PARRAY_BLKSIZE 16384
+#define PARRAY_L0COUNT (PARRAY_BLKSIZE / sizeof(struct parray_level0))
+#define PARRAY_L1COUNT (PARRAY_BLKSIZE / sizeof(struct parray_level1))
+#endif
+
+struct parray {
+    int toplevel;
+    int items;
+    struct parray_block *root;
+};
+
+struct parray_block {
+    union {
+	struct parray_level0 level0[PARRAY_L0COUNT];
+	struct parray_level1 level1[PARRAY_L1COUNT];
+    };
+};
+
+struct parray *parray_new(void)
+{
+    struct parray *pa = snew(struct parray);
+
+    pa->toplevel = -1;
+    pa->items = 0;
+    pa->root = NULL;
+
+    return pa;
+}
+
+void parray_append(struct parray *pa, int frame, int data)
+{
+    struct parray_block *pb, *pb2;
+    int i, n, index, count;
+
+    /*
+     * Special case: the very first item.
+     */
+    if (!pa->items) {
+	pb = snew(struct parray_block);
+
+	for (i = 0; i < PARRAY_L0COUNT; i++) {
+	    pb->level0[i].frame = INT_MAX;
+	    pb->level0[i].data = 0;
+	}
+	pb->level0[0].frame = frame;
+	pb->level0[0].data = data;
+
+	pa->items++;
+	pa->toplevel = 0;
+	pa->root = pb;
+
+	return;
+    }
+
+    /*
+     * Figure out how many items are covered by a single block at
+     * the parray's current top level.
+     */
+    count = PARRAY_L0COUNT;
+    for (i = 1; i <= pa->toplevel; i++)
+	count *= PARRAY_L1COUNT;
+
+    /*
+     * If this is equal to the parray's current total item count,
+     * we must create a new top-level block.
+     */
+    assert(pa->items <= count);
+    if (pa->items == count) {
+	pb = snew(struct parray_block);
+
+	/*
+	 * pa->root->level0[0].frame and pa->root->level1[0].frame
+	 * overlap exactly (guaranteed by the C standard), so we
+	 * don't need to worry about which one to access through.
+	 */
+	pb->level1[0].frame = pa->root->level1[0].frame;
+	pb->level1[0].subblock = pa->root;
+
+	pa->toplevel++;
+	pa->root = pb;
+
+	count *= PARRAY_L1COUNT;       /* we've moved up a level */
+    }
+
+    /*
+     * Now work down the tree. At each level, create a new block
+     * and descend to it if necessary, otherwise descend to the
+     * last existing block if it's not completely full.
+     */
+    pb = pa->root;
+    index = pa->items;
+    for (i = pa->toplevel; i-- > 0 ;) {
+	count /= PARRAY_L1COUNT;
+
+	n = index / count;
+	assert(n < PARRAY_L1COUNT);
+	index %= count;
+
+	if (!index) {
+	    /*
+	     * Create a new empty block at the next level down.
+	     */
+	    pb2 = snew(struct parray_block);
+	    pb->level1[n].frame = frame;
+	    pb->level1[n].subblock = pb2;
+	}
+
+	/*
+	 * Descend to the partially filled end block, whether or
+	 * not we just had to create it.
+	 */
+	pb = pb->level1[n].subblock;
+    }
+
+    /*
+     * Now we're sitting on a level-0 block which is known to have
+     * spare space. Add our entry.
+     */
+    pb->level0[index].frame = frame;
+    pb->level0[index].data = data;
+
+    pa->items++;
+}
+
+int parray_retrieve(struct parray *pa, int frame)
+{
+    struct parray_block *pb;
+    int count, total, i, n, top, bot, mid;
+
+    assert(pa->root);
+    assert(pa->items > 0);
+    assert(frame >= pa->root->level1[0].frame);
+
+    /*
+     * Figure out how many items are covered by a single block at
+     * the parray's current top level. This will tell us how many
+     * blocks to check at each level of the parray.
+     */
+    count = PARRAY_L0COUNT;
+    for (i = 1; i <= pa->toplevel; i++)
+	count *= PARRAY_L1COUNT;
+
+    /*
+     * Binary search each block on the way down.
+     */
+    pb = pa->root;
+    total = pa->items;
+    for (i = pa->toplevel; i-- > 0 ;) {
+	count /= PARRAY_L1COUNT;
+
+	n = (total + count - 1) / count;
+
+	bot = 0;
+	top = n;
+	while (top - bot > 1) {
+	    mid = (top + bot) / 2;
+	    if (pb->level1[mid].frame > frame)
+		top = mid;
+	    else
+		bot = mid;
+	}
+
+	total -= bot * count;
+	if (total > count)
+	    total = count;
+
+	pb = pb->level1[bot].subblock;
+    }
+
+    /*
+     * And binary search the bottom block.
+     */
+    bot = 0;
+    top = total;
+    while (top - bot > 1) {
+	mid = (top + bot) / 2;
+	if (pb->level0[mid].frame > frame)
+	    top = mid;
+	else
+	    bot = mid;
+    }
+
+    return pb->level0[bot].data;
+}
 
 #define CURSOR (inst->w * inst->h)
 #define TIMETOP (inst->w * inst->h + 1)
@@ -306,38 +512,12 @@ void store_frame(struct inst *inst, unsigned long long delay,
 	    n++;
     }
 
-    if (inst->movielen + n > inst->moviesize) {
-	inst->moviesize = (inst->movielen + n) * 5 / 4;
-	inst->movie = sresize(inst->movie, inst->moviesize, struct movie);
-    }
-
     for (i = 0; i < inst->screenlen; i++) {
 	if (inst->screen[i] != inst->oldscreen[i]) {
-	    inst->movie[inst->movielen].frame = inst->frames - 1;
-	    inst->movie[inst->movielen].index = i;
-	    inst->movie[inst->movielen].data = inst->screen[i];
-	    inst->movielen++;
+	    parray_append(inst->parrays[i], inst->frames-1, inst->screen[i]);
 	    inst->oldscreen[i] = inst->screen[i];
 	}
     }
-}
-
-int moviecmp(const void *av, const void *bv)
-{
-    const struct movie *a = (const struct movie *)av;
-    const struct movie *b = (const struct movie *)bv;
-
-    if (a->index < b->index)
-	return -1;
-    else if (a->index > b->index)
-	return +1;
-
-    if (a->frame < b->frame)
-	return -1;
-    else if (a->frame > b->frame)
-	return +1;
-
-    return 0;
 }
 
 void start_player(struct inst *inst)
@@ -372,42 +552,7 @@ void end_player(struct inst *inst)
 
 unsigned int_for_frame(struct inst *inst, int i, int f)
 {
-    int bot, top, mid, cmp;
-    struct movie mtmp;
-
-    /*
-     * Binary search to find the movie record which set integer
-     * i, as late as possible before or equal to frame f.
-     */
-    mtmp.frame = f;
-    mtmp.index = i;
-
-    bot = -1;
-    top = inst->movielen;
-
-    while (top - bot > 1) {
-	mid = (bot + top) / 2;
-	cmp = moviecmp(inst->movie + mid, &mtmp);
-	if (cmp < 0)
-	    bot = mid;
-	else if (cmp > 0)
-	    top = mid;
-	else {
-	    bot = mid;
-	    break;		       /* found it exactly! */
-	}
-    }
-
-    /*
-     * Now bot is the frame number we want. It could in theory
-     * still be -1, but only if we were searching for an
-     * integer less than zero, or integer zero at a frame less
-     * than zero.
-     */
-    assert(bot >= 0 && bot < inst->movielen);
-    assert(inst->movie[bot].index == i);
-    assert(inst->movie[bot].frame <= f);
-    return inst->movie[bot].data;
+    return parray_retrieve(inst->parrays[i], f);
 }
 
 void set_cpair(struct inst *inst, int col)
@@ -646,12 +791,34 @@ int main(int argc, char **argv)
     struct inst tinst, *inst = &tinst;
     char *pname;
     int i, totalsize;
-    time_t start, sortstart, end;
+    time_t start, end;
     int doing_opts;
     int iw, ih, startframe;
     int deftype = NODEFAULT;
     int prepareonly = FALSE;
     /* FILE *debugfp = fopen("/home/simon/.f", "w"); setvbuf(debugfp, NULL, _IONBF, 0); */
+
+#ifdef PARRAY_TEST
+    {
+	struct parray *pa;
+	int i, j, k;
+
+	pa = parray_new();
+	for (i = 0; i < 5*3*3*3; i++) {
+	    parray_append(pa, i, i*i);
+
+	    for (j = 0; j <= i; j++) {
+		k = parray_retrieve(pa, j);
+		if (k != j*j) {
+		    printf("FAIL: i=%d j=%d wrong=%d right=%d\n",
+			   i, j, k, j*j);
+		}
+	    }
+	}
+
+	exit(0);
+    }
+#endif
 
     pname = argv[0];
 
@@ -819,8 +986,9 @@ int main(int argc, char **argv)
     inst->term = term_init(&inst->cfg, &inst->ucsdata, inst);
     term_size(inst->term, inst->h, inst->w, 0);
 
-    inst->movie = NULL;
-    inst->movielen = inst->moviesize = 0;
+    inst->parrays = snewn(TOTAL, struct parray *);
+    for (i = 0; i < TOTAL; i++)
+	inst->parrays[i] = parray_new();
     inst->movietime = 0LL;
     inst->frames = 0;
 
@@ -1086,20 +1254,11 @@ int main(int argc, char **argv)
 	return 0;
     }
 
-    sortstart = time(NULL);
-
-    printf("Total %d frames, %d bytes of memory used\n",
-	   inst->frames, inst->movielen * sizeof(struct movie));
-    printf("Total loading time: %d seconds (%.3g sec/Mb)\n",
-	   (int)difftime(sortstart, start),
-	   difftime(sortstart, start) * 1048576 / totalsize);
-
-    qsort(inst->movie, inst->movielen, sizeof(struct movie), moviecmp);
-
-    printf("Sorted and ready to go.\n");
-
     end = time(NULL);
-    printf("Total loading and preparation time: %d seconds (%.3g sec/Mb)\n",
+
+    printf("Total %d frames" /* FIXME: ", %d bytes of memory used" */ "\n",
+	   inst->frames);
+    printf("Total loading time: %d seconds (%.3g sec/Mb)\n",
 	   (int)difftime(end, start),
 	   difftime(end, start) * 1048576 / totalsize);
 

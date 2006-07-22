@@ -236,6 +236,7 @@ struct parray_level1 {
 struct parray {
     int toplevel;
     int items;
+    int memusage;
     struct parray_block *root;
 };
 
@@ -252,6 +253,7 @@ struct parray *parray_new(void)
 
     pa->toplevel = -1;
     pa->items = 0;
+    pa->memusage = sizeof(struct parray);
     pa->root = NULL;
 
     return pa;
@@ -267,6 +269,7 @@ void parray_append(struct parray *pa, int frame, int data)
      */
     if (!pa->items) {
 	pb = snew(struct parray_block);
+	pa->memusage += sizeof(struct parray_block);
 
 	for (i = 0; i < PARRAY_L0COUNT; i++) {
 	    pb->level0[i].frame = INT_MAX;
@@ -297,6 +300,7 @@ void parray_append(struct parray *pa, int frame, int data)
     assert(pa->items <= count);
     if (pa->items == count) {
 	pb = snew(struct parray_block);
+	pa->memusage += sizeof(struct parray_block);
 
 	/*
 	 * pa->root->level0[0].frame and pa->root->level1[0].frame
@@ -1256,8 +1260,13 @@ int main(int argc, char **argv)
 
     end = time(NULL);
 
-    printf("Total %d frames" /* FIXME: ", %d bytes of memory used" */ "\n",
-	   inst->frames);
+    {
+	int memusage = 0, i;
+	for (i = 0; i < TOTAL; i++)
+	    memusage += inst->parrays[i]->memusage;
+	printf("Total %d frames, %d bytes loaded, %d bytes of memory used\n",
+	       inst->frames, totalsize, memusage);
+    }
     printf("Total loading time: %d seconds (%.3g sec/Mb)\n",
 	   (int)difftime(end, start),
 	   difftime(end, start) * 1048576 / totalsize);

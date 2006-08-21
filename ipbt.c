@@ -1373,13 +1373,34 @@ int main(int argc, char **argv)
 		fb = f;
 		changed = TRUE;
 	    } else if (c >= '0' && c <= '9') {
-		inst->number = inst->number * 10 + (c - '0');
+		/* check against integer overflow */
+		if (inst->number <= INT_MAX / 10 &&
+		    inst->number * 10 <= INT_MAX - (c - '0'))
+		    inst->number = inst->number * 10 + (c - '0');
 	    } else if (c == 'o' || c == 'O') {
 		inst->osd = !inst->osd;
 		inst->number = 0;
 	    } else if (c == 'l' || c == 'L') {
 		inst->logmod = !inst->logmod;
 		inst->number = 0;
+		/*
+		 * After toggling logarithmic time compression, set
+		 * `changed = TRUE' to recompute the current wait
+		 * interval.
+		 * 
+		 * Ideally this would take account of the
+		 * proportion of that interval which had already
+		 * elapsed, but it's unclear exactly what that even
+		 * means: when switching from linear to log mode,
+		 * do you set the remaining wait interval to the
+		 * log of the remaining linear time, or to the same
+		 * proportion of the overall log time as was left
+		 * of the linear time? And vice versa going the
+		 * other way. So for the moment this is very simple
+		 * and just restarts the wait interval from the
+		 * beginning of its new length when you press L.
+		 */
+		changed = TRUE;
 	    } else if (c == 'x') {
 		t *= inst->speedmod;
 		inst->speedmod = (inst->number ? inst->number : 1);

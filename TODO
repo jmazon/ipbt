@@ -61,10 +61,10 @@ Things I haven't quite decided whether I want yet:
    to do. Perhaps better to leave it as it currently is: you can
    jump to an arbitrary ttyrec frame by its frame number, and if you
    need to track down a particular NetHack turn number you can
-   binary-search the available frames. Alternatively, if [SEARCH]
-   were implemented then you could just search for `T:12345',
-   although this would take linear time rather than the log time one
-   could achieve by making use of the known monotonicity.
+   binary-search the available frames. An approach feasible with
+   existing features is just to search for `T:12345', although this
+   takes linear time rather than the log time one could achieve by
+   making use of the known monotonicity.
 
  - [SAVEFILE] Save the movie data to a file once processed and
    sorted. If one is planning to watch a very long replay in many
@@ -106,15 +106,16 @@ Longer-range ideas which would involve a lot of work:
    Windows clone of the current Curses keyboard-and-command-line
    interface. Depends on [ABSTRACTION].
 
- - [SEARCH] Searching the recording for particular text on the
-   screen might be an interesting feature, so you could easily find
-   where in a NetHack game you (say) picked up a particular object
-   or acquired some useful intrinsic. It's clearly better to search
-   the processed movie than the input data, since curses screen
-   update optimisations might prevent your text appearing in full in
-   the latter. `ttygrep' is a decent stopgap measure in the absence
-   of this feature, since most of NetHack's status line messages
-   seem to be printed in one go so it's adequate for finding those.
+ - [SEARCHREFINEMENTS] It might be useful to remember at what _point
+   on the screen_ the search text was found in previous frames, so
+   that we can avoid finding it again in that precise place. In
+   other words, we'd now be searching for frames in which the search
+   text has _just appeared_ rather than simply being present.
+   Helpful if, for example, you search for something which appears
+   in a Nethack player's inventory, because otherwise the search
+   will stop at _every_ frame during a lengthy inventory
+   manipulation. However, this is significantly more complex than
+   the current simple searching, so I haven't done it yet.
 
  - [BGLOAD] Have a mode in which the player starts up instantly, and
    the rest of the file(s) are read in the background while

@@ -179,6 +179,8 @@ struct inst {
     int playing;
     int logmod;
     double speedmod;
+    char *searchstr;
+    int searchback;
 };
 
 /*
@@ -356,10 +358,10 @@ void parray_append(struct parray *pa, int frame, int data)
     pa->items++;
 }
 
-int parray_retrieve(struct parray *pa, int frame)
+int parray_search(struct parray *pa, int frame, int *index_out)
 {
     struct parray_block *pb;
-    int count, total, i, n, top, bot, mid;
+    int count, total, i, n, top, bot, mid, index;
 
     assert(pa->root);
     assert(pa->items > 0);
@@ -373,6 +375,8 @@ int parray_retrieve(struct parray *pa, int frame)
     count = PARRAY_L0COUNT;
     for (i = 1; i <= pa->toplevel; i++)
 	count *= PARRAY_L1COUNT;
+
+    index = 0;
 
     /*
      * Binary search each block on the way down.
@@ -395,6 +399,7 @@ int parray_retrieve(struct parray *pa, int frame)
 	}
 
 	total -= bot * count;
+	index += bot * count;
 	if (total > count)
 	    total = count;
 
@@ -402,7 +407,7 @@ int parray_retrieve(struct parray *pa, int frame)
     }
 
     /*
-     * And binary search the bottom block.
+     * And binary-search the bottom block.
      */
     bot = 0;
     top = total;
@@ -414,7 +419,44 @@ int parray_retrieve(struct parray *pa, int frame)
 	    bot = mid;
     }
 
+    index += bot;
+    if (index_out)
+	*index_out = index;
+
     return pb->level0[bot].data;
+}
+
+int parray_retrieve(struct parray *pa, int index, int *frame)
+{
+    struct parray_block *pb;
+    int count, total, i, n;
+
+    assert(pa->root);
+    assert(index >= 0 && index < pa->items);
+
+    /*
+     * Figure out how many items are covered by a single block at
+     * the parray's current top level.
+     */
+    count = PARRAY_L0COUNT;
+    for (i = 1; i <= pa->toplevel; i++)
+	count *= PARRAY_L1COUNT;
+
+    /*
+     * Search down the tree.
+     */
+    pb = pa->root;
+    total = pa->items;
+    for (i = pa->toplevel; i-- > 0 ;) {
+	count /= PARRAY_L1COUNT;
+	n = index / count;
+	index -= n * count;
+	pb = pb->level1[n].subblock;
+    }
+
+    if (frame)
+	*frame = pb->level0[index].frame;
+    return pb->level0[index].data;
 }
 
 #define CURSOR (inst->w * inst->h)
@@ -546,8 +588,6 @@ void start_player(struct inst *inst)
 
 void end_player(struct inst *inst)
 {
-    int my, mx;
-
     if (!curses_active)
 	return;
     endwin();
@@ -556,7 +596,7 @@ void end_player(struct inst *inst)
 
 unsigned int_for_frame(struct inst *inst, int i, int f)
 {
-    return parray_retrieve(inst->parrays[i], f);
+    return parray_search(inst->parrays[i], f, NULL);
 }
 
 void set_cpair(struct inst *inst, int col)
@@ -774,6 +814,178 @@ void display_frame(struct inst *inst, int f)
     wmove(stdscr, y, x);
 }
 
+/*
+ * Search the movie array for a frame containing a given piece of
+ * text. Returns the frame in which the text was found, or <0 if
+ * not.
+ */
+int search(struct inst *inst, char *string, int start_frame, int backwards)
+{
+    int f = start_frame;
+    int i, j, k, len;
+    int *searchlines;
+    int *indices, *nextframes;
+    char *scrbuf;
+
+    /*
+     * Check the bounds.
+     */
+    if (start_frame >= inst->frames || start_frame < 0)
+	return -1;		       /* not found */
+
+    /*
+     * We track which lines of the display actually changed between
+     * frames, in order to avoid repeatedly searching an unchanged
+     * line. Initially, of course, we set all these flags to TRUE
+     * because the first frame must be searched in full.
+     */
+    searchlines = snewn(inst->h, int);
+    for (i = 0; i < inst->h; i++)
+	searchlines[i] = TRUE;
+
+    /*
+     * Allocate space for tracking indices, and the next frame in
+     * which each integer changes, in the display parrays.
+     */
+    indices = snewn(inst->w * inst->h, int);
+    nextframes = snewn(inst->w * inst->h, int);
+    for (i = 0; i < inst->w * inst->h; i++)
+	indices[i] = -1;
+
+    /*
+     * And allocate space for the actual display buffer.
+     */
+    scrbuf = snewn(inst->w * inst->h, char);
+    memset(scrbuf, 0, inst->w * inst->h);
+
+    len = strlen(string);
+
+    while (1) {
+	/*
+	 * Retrieve the current frame.
+	 */
+	for (i = 0; i < inst->w * inst->h; i++) {
+	    int integer, nextframe = -1;
+	    int changed = FALSE;
+
+	    if (indices[i] < 0) {
+		/*
+		 * This is the first time we've retrieved this
+		 * integer, so we need to do a conventional
+		 * retrieve operation and set up our index.
+		 */
+		integer = parray_search(inst->parrays[i], f, &indices[i]);
+		changed = TRUE;
+	    } else if (backwards && f < nextframes[i]) {
+		/*
+		 * This integer has changed in this frame (reverse
+		 * search version).
+		 */
+		indices[i]--;
+		integer = parray_retrieve(inst->parrays[i], indices[i],
+					  &nextframe);
+		changed = TRUE;
+	    } else if (!backwards && f >= nextframes[i]) {
+		/*
+		 * This integer has changed in this frame (forward
+		 * search version).
+		 */
+		indices[i]++;
+		integer = parray_retrieve(inst->parrays[i], indices[i], NULL);
+		changed = TRUE;
+	    }
+
+	    if (changed) {
+		char bufval;
+
+		/*
+		 * Update the screen buffer and mark this line as
+		 * changed.
+		 */
+		if (integer & 0x100)
+		    bufval = 0;	       /* ignore line drawing characters */
+		else
+		    bufval = integer;
+
+		if (scrbuf[i] != bufval) {
+		    scrbuf[i] = bufval;
+		    searchlines[i / inst->w] = TRUE;
+		}
+
+		/*
+		 * Find the next frame in which this integer
+		 * changes.
+		 */
+		if (nextframe < 0) {
+		    if (backwards)
+			parray_retrieve(inst->parrays[i], indices[i],
+					&nextframe);
+		    else {
+			if (indices[i]+1 < inst->parrays[i]->items)
+			    parray_retrieve(inst->parrays[i], indices[i]+1,
+					    &nextframe);
+			else
+			    nextframe = inst->frames;
+		    }
+		}
+		nextframes[i] = nextframe;
+	    }
+	}
+
+	/*
+	 * Search whatever lines of the current frame we need to.
+	 */
+	for (i = 0; i < inst->h; i++)
+	    if (searchlines[i]) {
+		searchlines[i] = FALSE;
+		int found;
+
+		/*
+		 * FIXME: for the moment we'll just do a naive
+		 * string search.
+		 */
+		found = FALSE;
+		for (j = 0; j <= inst->w - len; j++) {
+		    for (k = 0; k < len; k++)
+			if (scrbuf[i * inst->h + j + k] != string[k])
+			    break;
+		    if (k == len) {
+			found = TRUE;
+			break;
+		    }
+		}
+		if (found)
+		    goto found_it;
+	    }
+
+	/*
+	 * Not found, so move to next frame.
+	 */
+	if (backwards) {
+	    f--;
+	    if (f < 0) {
+		f = -1;
+		goto found_it;
+	    }
+	} else {
+	    f++;
+	    if (f >= inst->frames) {
+		f = -1;
+		goto found_it;
+	    }
+	}
+    }
+
+    found_it:
+
+    sfree(scrbuf);
+    sfree(nextframes);
+    sfree(indices);
+    sfree(searchlines);
+
+    return f;
+}
+
 long long time_after_frame(struct inst *inst, int f)
 {
     unsigned long long t1, t2;
@@ -790,6 +1002,84 @@ long long time_after_frame(struct inst *inst, int f)
     return t2 - t1;
 }
 
+char *getstring(struct inst *inst, const char *prompt)
+{
+    int w, h, plen, slen, i, c;
+    char *str;
+    int size, len;
+
+    size = len = 0;
+    str = NULL;
+
+    getmaxyx(stdscr, h, w);
+
+    plen = strlen(prompt);
+    if (plen > w-2)
+	plen = w-2;
+    slen = w - plen - 1;
+
+    while (1) {
+	/*
+	 * Display the prompt and the current input.
+	 */
+	wmove(stdscr, h-1, 0);
+	wattrset(stdscr, A_NORMAL);
+	wattron(stdscr, A_BOLD);
+	set_cpair(inst, 0x47);	       /* white on blue */
+	waddnstr(stdscr, prompt, plen);
+	if (len > slen) {
+	    waddch(stdscr, '<');
+	    waddnstr(stdscr, str + len - slen + 1, slen - 1);
+	    wmove(stdscr, h-1, plen + slen);
+	} else {
+	    waddnstr(stdscr, str, len);
+	    for (i = len + plen; i < w; i++)
+		waddch(stdscr, ' ');
+	    wmove(stdscr, h-1, plen + len);
+	}
+
+	/*
+	 * Get a character.
+	 */
+	c = getch();
+	if (c >= ' ' && c <= '~') {
+	    /*
+	     * Append this character to the string.
+	     */
+	    if (len >= size) {
+		size = (len + 5) * 3 / 2;
+		str = sresize(str, size, char);
+	    }
+	    str[len++] = c;
+	} else if (c == '\010' || c == '\177') {
+	    if (len > 0)
+		len--;
+	} else if (c == '\025') {
+	    len = 0;		       /* ^U clears line */
+	} else if (c == '\027') {
+	    /* ^W deletes a word */
+	    while (len > 0 && isspace((unsigned char)(str[len-1])))
+		len--;
+	    while (len > 0 && !isspace((unsigned char)(str[len-1])))
+		len--;
+	} else if (c == '\r' || c == '\n') {
+	    break;
+	} else if (c == '\033') {
+	    len = 0;
+	    break;
+	}
+    }
+
+    if (len == 0) {
+	sfree(str);
+	return NULL;
+    } else {
+	str = sresize(str, len+1, char);
+	str[len] = '\0';
+	return str;
+    }
+}
+
 int main(int argc, char **argv)
 {
     struct inst tinst, *inst = &tinst;
@@ -797,7 +1087,7 @@ int main(int argc, char **argv)
     int i, totalsize;
     time_t start, end;
     int doing_opts;
-    int iw, ih, startframe;
+    int iw, ih, startframe = 0;
     int deftype = NODEFAULT;
     int prepareonly = FALSE;
     /* FILE *debugfp = fopen("/home/simon/.f", "w"); setvbuf(debugfp, NULL, _IONBF, 0); */
@@ -812,7 +1102,7 @@ int main(int argc, char **argv)
 	    parray_append(pa, i, i*i);
 
 	    for (j = 0; j <= i; j++) {
-		k = parray_retrieve(pa, j);
+		k = parray_search(pa, j, NULL);
 		if (k != j*j) {
 		    printf("FAIL: i=%d j=%d wrong=%d right=%d\n",
 			   i, j, k, j*j);
@@ -843,6 +1133,8 @@ int main(int argc, char **argv)
 	else
 	    inst->ucsdata.unitab_xterm[i] = inst->ucsdata.unitab_line[i];
     }
+
+    inst->ucsdata.dbcs_screenfont = FALSE;
 
     inst->filenames = NULL;
     inst->nfiles = inst->filesize = 0;
@@ -988,6 +1280,7 @@ int main(int argc, char **argv)
 	inst->oldscreen[i] = 0xFFFFFFFF;
 
     inst->term = term_init(&inst->cfg, &inst->ucsdata, inst);
+    inst->term->ldisc = NULL;
     term_size(inst->term, inst->h, inst->w, 0);
 
     inst->parrays = snewn(TOTAL, struct parray *);
@@ -1194,7 +1487,9 @@ int main(int argc, char **argv)
 	  case NHRECORDER:
 	    fileoff = 0;
 	    frametime = (inst->movietime == 0 ? 0 : 1000000);
+	    nhrstate = 0;
 	    oldtimestamp = 0;
+	    timestamp = 0;
 	    while (1) {
 		int i;
 		long thisoff = ftell(fp);
@@ -1287,6 +1582,8 @@ int main(int argc, char **argv)
 	inst->playing = FALSE;
 	inst->logmod = FALSE;
 	inst->speedmod = 1.0;
+	inst->searchstr = NULL;
+	inst->searchback = FALSE;
 
 	start_player(inst);
 	while (1) {
@@ -1432,6 +1729,34 @@ int main(int argc, char **argv)
 		    f++;
 		inst->number = 0;
 		changed = TRUE;
+	    } else if (c == '/' || c == '?' || c == '\\' ||
+		       c == 'n' || c == 'N') {
+		int sf, back;
+		char *str;
+		if (c == '/' || c == '?' || c == '\\') {
+		    changed = TRUE;    /* need to redraw to remove prompt */
+		    str = getstring(inst, (c == '/' ? "Search forward: " :
+					   "Search backward: "));
+		    if (str) {
+			sfree(inst->searchstr);
+			inst->searchstr = str;
+			inst->searchback = (c != '/');
+		    }
+		} else
+		    str = inst->searchstr;
+		if (str) {
+		    if (c == 'N')
+			back = !inst->searchback;
+		    else
+			back = inst->searchback;
+		    sf = search(inst, str, f + (back ? -1 : 1), back);
+		    if (sf > 0) {
+			f = sf;
+			changed = TRUE;/* need to redraw because we've moved */
+		    } else {
+			beep();	       /* not found */
+		    }
+		}
 	    }
 	}
 	end_player(inst);

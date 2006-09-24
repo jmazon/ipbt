@@ -67,5 +67,12 @@ here's a quick list of the available keystrokes during playback:
    to that many frames from the end.
  * `p' (and also `s', for historical reasons) toggles pause mode.
    Pause mode is initially enabled.
+ * '/' searches forward for a frame containing the given text.
+ * '?' and `\' both search backward for a frame containing the given
+   text.
+ * `n' repeats the previous search: searches for the same text in
+   the same direction (i.e. `go to next match').
+ * `N' repeats the previous search in reverse: searches for the same
+   text in the opposite direction (i.e. `go to _previous_ match').
 
 Oh, and `ipbt' stands for `It's Play-Back Time'.

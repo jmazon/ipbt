@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <math.h>
 #include <limits.h>
+#include <ctype.h>
 
 #include <ncurses.h>
 
@@ -246,7 +247,7 @@ struct parray_block {
     union {
 	struct parray_level0 level0[PARRAY_L0COUNT];
 	struct parray_level1 level1[PARRAY_L1COUNT];
-    };
+    } u;
 };
 
 struct parray *parray_new(void)
@@ -274,11 +275,11 @@ void parray_append(struct parray *pa, int frame, int data)
 	pa->memusage += sizeof(struct parray_block);
 
 	for (i = 0; i < PARRAY_L0COUNT; i++) {
-	    pb->level0[i].frame = INT_MAX;
-	    pb->level0[i].data = 0;
+	    pb->u.level0[i].frame = INT_MAX;
+	    pb->u.level0[i].data = 0;
 	}
-	pb->level0[0].frame = frame;
-	pb->level0[0].data = data;
+	pb->u.level0[0].frame = frame;
+	pb->u.level0[0].data = data;
 
 	pa->items++;
 	pa->toplevel = 0;
@@ -305,12 +306,13 @@ void parray_append(struct parray *pa, int frame, int data)
 	pa->memusage += sizeof(struct parray_block);
 
 	/*
-	 * pa->root->level0[0].frame and pa->root->level1[0].frame
-	 * overlap exactly (guaranteed by the C standard), so we
-	 * don't need to worry about which one to access through.
+	 * pa->root->u.level0[0].frame and
+	 * pa->root->u.level1[0].frame overlap exactly (guaranteed
+	 * by the C standard), so we don't need to worry about
+	 * which one to access through.
 	 */
-	pb->level1[0].frame = pa->root->level1[0].frame;
-	pb->level1[0].subblock = pa->root;
+	pb->u.level1[0].frame = pa->root->u.level1[0].frame;
+	pb->u.level1[0].subblock = pa->root;
 
 	pa->toplevel++;
 	pa->root = pb;
@@ -337,23 +339,23 @@ void parray_append(struct parray *pa, int frame, int data)
 	     * Create a new empty block at the next level down.
 	     */
 	    pb2 = snew(struct parray_block);
-	    pb->level1[n].frame = frame;
-	    pb->level1[n].subblock = pb2;
+	    pb->u.level1[n].frame = frame;
+	    pb->u.level1[n].subblock = pb2;
 	}
 
 	/*
 	 * Descend to the partially filled end block, whether or
 	 * not we just had to create it.
 	 */
-	pb = pb->level1[n].subblock;
+	pb = pb->u.level1[n].subblock;
     }
 
     /*
      * Now we're sitting on a level-0 block which is known to have
      * spare space. Add our entry.
      */
-    pb->level0[index].frame = frame;
-    pb->level0[index].data = data;
+    pb->u.level0[index].frame = frame;
+    pb->u.level0[index].data = data;
 
     pa->items++;
 }
@@ -365,7 +367,7 @@ int parray_search(struct parray *pa, int frame, int *index_out)
 
     assert(pa->root);
     assert(pa->items > 0);
-    assert(frame >= pa->root->level1[0].frame);
+    assert(frame >= pa->root->u.level1[0].frame);
 
     /*
      * Figure out how many items are covered by a single block at
@@ -392,7 +394,7 @@ int parray_search(struct parray *pa, int frame, int *index_out)
 	top = n;
 	while (top - bot > 1) {
 	    mid = (top + bot) / 2;
-	    if (pb->level1[mid].frame > frame)
+	    if (pb->u.level1[mid].frame > frame)
 		top = mid;
 	    else
 		bot = mid;
@@ -403,7 +405,7 @@ int parray_search(struct parray *pa, int frame, int *index_out)
 	if (total > count)
 	    total = count;
 
-	pb = pb->level1[bot].subblock;
+	pb = pb->u.level1[bot].subblock;
     }
 
     /*
@@ -413,7 +415,7 @@ int parray_search(struct parray *pa, int frame, int *index_out)
     top = total;
     while (top - bot > 1) {
 	mid = (top + bot) / 2;
-	if (pb->level0[mid].frame > frame)
+	if (pb->u.level0[mid].frame > frame)
 	    top = mid;
 	else
 	    bot = mid;
@@ -423,7 +425,7 @@ int parray_search(struct parray *pa, int frame, int *index_out)
     if (index_out)
 	*index_out = index;
 
-    return pb->level0[bot].data;
+    return pb->u.level0[bot].data;
 }
 
 int parray_retrieve(struct parray *pa, int index, int *frame)
@@ -451,12 +453,12 @@ int parray_retrieve(struct parray *pa, int index, int *frame)
 	count /= PARRAY_L1COUNT;
 	n = index / count;
 	index -= n * count;
-	pb = pb->level1[n].subblock;
+	pb = pb->u.level1[n].subblock;
     }
 
     if (frame)
-	*frame = pb->level0[index].frame;
-    return pb->level0[index].data;
+	*frame = pb->u.level0[index].frame;
+    return pb->u.level0[index].data;
 }
 
 #define CURSOR (inst->w * inst->h)
@@ -1275,8 +1277,8 @@ int main(int argc, char **argv)
     inst->h = ih;
 
     inst->screenlen = TOTAL;
-    inst->screen = snewn(inst->screenlen, unsigned int);
-    inst->oldscreen = snewn(inst->screenlen, unsigned int);
+    inst->screen = snewn(inst->screenlen, int);
+    inst->oldscreen = snewn(inst->screenlen, int);
     for (i = 0; i < inst->screenlen; i++)
 	inst->oldscreen[i] = 0xFFFFFFFF;
 
@@ -1508,7 +1510,7 @@ int main(int argc, char **argv)
 			    nhrstate = 1;
 			    timestamp = 0;
 			} else {
-			    term_data(inst->term, FALSE, nhrbuf+i, 1);
+			    term_data(inst->term, FALSE, (char *)nhrbuf+i, 1);
 			}
 			break;
 		      case 1:

@@ -937,8 +937,9 @@ int search(struct inst *inst, char *string, int start_frame, int backwards)
 	 */
 	for (i = 0; i < inst->h; i++)
 	    if (searchlines[i]) {
-		searchlines[i] = FALSE;
 		int found;
+
+		searchlines[i] = FALSE;
 
 		/*
 		 * FIXME: for the moment we'll just do a naive
@@ -947,7 +948,7 @@ int search(struct inst *inst, char *string, int start_frame, int backwards)
 		found = FALSE;
 		for (j = 0; j <= inst->w - len; j++) {
 		    for (k = 0; k < len; k++)
-			if (scrbuf[i * inst->h + j + k] != string[k])
+			if (scrbuf[i * inst->w + j + k] != string[k])
 			    break;
 		    if (k == len) {
 			found = TRUE;

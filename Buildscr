@@ -1,0 +1,11 @@
+# -*- sh -*-
+# Build script for IPBT.
+
+module ipbt
+
+# All we need here is to build a source archive with the right name.
+in . do ln -s ipbt ipbt-r$(revision)
+in . do tar chzvf ipbt-r$(revision).tar.gz ipbt-r$(revision)
+
+# And deliver it.
+deliver ipbt-r$(revision).tar.gz $@

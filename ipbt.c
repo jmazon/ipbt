@@ -1602,6 +1602,8 @@ int main(int argc, char **argv)
 		changed = FALSE;
 		if (inst->playing) {
 		    t = time_after_frame(inst, f);
+		    if (t < 0)
+			t = 0;	       /* just in case ttyrec is malformed */
 		    if (inst->logmod) {
 			/*
 			 * Logarithmic time compression: we replace

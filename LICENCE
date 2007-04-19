@@ -5,7 +5,7 @@ The PuTTY copyright notice is reproduced below. The long list of
 copyright holders are not all actually relevant, since some of them
 contributed code to PuTTY which is not included in IPBT.
 
-| PuTTY is copyright 1997-2005 Simon Tatham.
+| PuTTY is copyright 1997-2007 Simon Tatham.
 |
 | Portions copyright Robert de Bath, Joris van Rantwijk, Delian
 | Delchev, Andreas Schultz, Jeroen Massar, Wez Furlong, Nicolas Barry,
@@ -13,7 +13,8 @@ contributed code to PuTTY which is not included in IPBT.
 | Kuhn, and CORE SDI S.A.
 
 Those portions of IPBT which are not part of PuTTY are copyright
-2005 Simon Tatham. The same licence terms apply to them as to PuTTY:
+2005-2007 Simon Tatham. The same licence terms apply to them as to
+PuTTY:
 
 | Permission is hereby granted, free of charge, to any person
 | obtaining a copy of this software and associated documentation files

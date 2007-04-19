@@ -48,6 +48,10 @@ xenc.o: xenc.c charset.h internal.h
 sbcsdat.c: sbcsgen.pl sbcs.dat
 	perl sbcsgen.pl
 
+ipbt.1 ipbt.html: ipbt.but
+	halibut --man=ipbt.1 --html=ipbt.html ipbt.but
+
 clean:
 	rm -f *.o ipbt sbcsdat.c
 	rm -f *.da *.bbg *.bb *.gcov gmon.out
+	rm -f ipbt.1

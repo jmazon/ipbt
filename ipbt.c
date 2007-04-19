@@ -11,11 +11,95 @@
 
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include "putty.h"
 #include "terminal.h"
 #include "misc.h"
+
+const char usagemsg[] =
+    "usage: ipbt [ [ -w width ] [ -h height ] | -u ] [ -T | -N ]\n"
+    "            [ -f frame ] [ -P ] file [file...]\n"
+    "where: -w width    specify width of emulated terminal screen (default 80)\n"
+    "       -h height   specify height of emulated terminal screen (default 24)\n"
+    "       -u          use size of real terminal for emulated terminal\n"
+    "       -T          assume input files to be ttyrec format\n"
+    "       -N          assume input files to be nh-recorder format\n"
+    "       -f frame    start viewing at a particular frame number\n"
+    "       -P          terminate immediately after reading input\n"
+    " also: ipbt --version     report version number\n"
+    "       ipbt --help        display this help text\n"
+    "       ipbt --licence     display the (MIT) licence text\n"
+    ;
+
+void usage(void) {
+    fputs(usagemsg, stdout);
+}
+
+const char licencemsg[] =
+    "IPBT is an application derived from the PuTTY source base by Simon\n"
+    "Tatham.\n"
+    "\n"
+    "The PuTTY copyright notice is reproduced below. The long list of\n"
+    "copyright holders are not all actually relevant, since some of them\n"
+    "contributed code to PuTTY which is not included in IPBT.\n"
+    "\n"
+    "| PuTTY is copyright 1997-2007 Simon Tatham.\n"
+    "|\n"
+    "| Portions copyright Robert de Bath, Joris van Rantwijk, Delian\n"
+    "| Delchev, Andreas Schultz, Jeroen Massar, Wez Furlong, Nicolas Barry,\n"
+    "| Justin Bradford, Ben Harris, Malcolm Smith, Ahmad Khalifa, Markus\n"
+    "| Kuhn, and CORE SDI S.A.\n"
+    "\n"
+    "Those portions of IPBT which are not part of PuTTY are copyright\n"
+    "2005-2007 Simon Tatham. The same licence terms apply to them as to\n"
+    "PuTTY:\n"
+    "\n"
+    "| Permission is hereby granted, free of charge, to any person\n"
+    "| obtaining a copy of this software and associated documentation files\n"
+    "| (the \"Software\"), to deal in the Software without restriction,\n"
+    "| including without limitation the rights to use, copy, modify, merge,\n"
+    "| publish, distribute, sublicense, and/or sell copies of the Software,\n"
+    "| and to permit persons to whom the Software is furnished to do so,\n"
+    "| subject to the following conditions:\n"
+    "|\n"
+    "| The above copyright notice and this permission notice shall be\n"
+    "| included in all copies or substantial portions of the Software.\n"
+    "|\n"
+    "| THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+    "| EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF\n"
+    "| MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n"
+    "| NONINFRINGEMENT.  IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE\n"
+    "| FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF\n"
+    "| CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION\n"
+    "| WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n"
+    ;
+
+void licence(void) {
+    fputs(licencemsg, stdout);
+}
+
+void version(void) {
+#define SVN_REV "$Revision$"
+    char rev[sizeof(SVN_REV)];
+    char *p, *q;
+
+    strcpy(rev, SVN_REV);
+
+    for (p = rev; *p && *p != ':'; p++);
+    if (*p) {
+        p++;
+        while (*p && isspace((unsigned char)*p)) p++;
+        for (q = p; *q && !isspace((unsigned char)*q) && *q != '$'; q++);
+        if (*q) *q = '\0';
+        printf("ipbt revision %s", p);
+    } else {
+        printf("ipbt: unknown version");
+    }
+    putchar('\n');
+}
 
 int curses_active;
 
@@ -1187,7 +1271,18 @@ int main(int argc, char **argv)
 			 !strcmp(p, "nh-recording") ||
 			 !strcmp(p, "nh_recording"))
 		    optchr = 'N';
-		else
+		else if (!strcmp(p, "use-terminal-size"))
+		    optchr = 'u';
+		else if (!strcmp(p, "help")) {
+		    usage();
+		    return 0;
+		} else if (!strcmp(p, "version")) {
+		    version();
+		    return 0;
+		} else if (!strcmp(p, "licence")) {
+		    licence();
+		    return 0;
+		} else
 		    optchr = '\1';     /* definitely not defined */
 	    } else {
 		optbuf[0] = '-';
@@ -1255,6 +1350,23 @@ int main(int argc, char **argv)
 		break;
 	      case 'P':
 		prepareonly = TRUE;
+		break;
+	      case 'u':
+		/*
+		 * Use the current screen size as the internal
+		 * player's screen size.
+		 */
+		{
+		    struct winsize ws;
+
+		    if (!ioctl (0, TIOCGWINSZ, &ws)) {
+			ih = ws.ws_row;
+			iw = ws.ws_col;
+		    } else {
+			fprintf(stderr, "%s: unable to discover"
+				" terminal size%s\n", strerror(errno));
+		    }
+		}
 		break;
 	      default:
 		fprintf(stderr, "%s: unrecognised option '%s'\n",
@@ -1552,7 +1664,7 @@ int main(int argc, char **argv)
     }
 
     if (!inst->frames) {
-	fprintf(stderr, "usage: %s <file> [<file...]\n", pname);
+	usage();
 	return 0;
     }
 

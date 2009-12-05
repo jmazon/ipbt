@@ -6,6 +6,7 @@
 #include <math.h>
 #include <limits.h>
 #include <ctype.h>
+#include <locale.h>
 
 #include <ncurses.h>
 
@@ -655,6 +656,8 @@ void store_frame(struct inst *inst, unsigned long long delay,
 void start_player(struct inst *inst)
 {
     int i;
+
+    setlocale(LC_CTYPE, ""); /* arrange that curses can query the charset */
 
     initscr();
     noecho();

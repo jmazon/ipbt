@@ -7,7 +7,7 @@ IPBT = be_none.o fromucs.o ipbt.o ldiscucs.o localenc.o macenc.o mimeenc.o \
        wcwidth.o xenc.o
 
 ipbt: $(IPBT)
-	$(CC) $(LFLAGS) -o ipbt $(IPBT) -lm -lncurses
+	$(CC) $(LFLAGS) -o ipbt $(IPBT) -lm -lncursesw
 
 be_none.o: be_none.c putty.h puttyps.h unix.h charset.h network.h misc.h \
   puttymem.h

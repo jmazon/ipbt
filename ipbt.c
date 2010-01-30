@@ -25,6 +25,7 @@ const char usagemsg[] =
     "            [ -f frame ] [ -P ] file [file...]\n"
     "where: -w width    specify width of emulated terminal screen (default 80)\n"
     "       -h height   specify height of emulated terminal screen (default 24)\n"
+    "       -l          lazy parsing (immediate playback)\n"
     "       -u          use size of real terminal for emulated terminal\n"
     "       -T          assume input files to be ttyrec format\n"
     "       -N          assume input files to be nh-recorder format\n"
@@ -180,7 +181,7 @@ struct inst {
     Terminal *term;
     struct unicode_data ucsdata;
     Config cfg;
-    int *screen, *oldscreen, w, h, screenlen;
+    int *playscreen, *screen, *oldscreen, w, h, screenlen;
     struct parray **parrays;
     int frames;
     unsigned long long movietime;
@@ -656,14 +657,14 @@ void display_frame(struct inst *inst, int f)
      */
 
     for (i = 0; i < inst->screenlen; i++)
-	inst->screen[i] = int_for_frame(inst, i, f);
+	inst->playscreen[i] = int_for_frame(inst, i, f);
 
     /*
      * Now display it.
      */
     for (y = 0; y < inst->h; y++)
 	for (x = 0; x < inst->w; x++) {
-	    unsigned val = inst->screen[y*inst->w + x];
+	    unsigned val = inst->playscreen[y*inst->w + x];
 	    int col, ch;
 
 	    wattrset(stdscr, A_NORMAL);
@@ -825,7 +826,7 @@ void display_frame(struct inst *inst, int f)
     /*
      * Position the cursor.
      */
-    x = inst->screen[CURSOR];
+    x = inst->playscreen[CURSOR];
     y = x / inst->w;
     x %= inst->w;
     wmove(stdscr, y, x);
@@ -1110,8 +1111,10 @@ int read_block(struct inst *inst, struct reader *reader)
         reader->oldtimestamp = 0LL;
         reader->type = inst->filenames[reader->i].type;
 
-        printf("Reading %s (%s) ... ", reader->p, typenames[reader->type]);
-        fflush(stdout);
+        if (!inst->reader) {
+            printf("Reading %s (%s) ... ", reader->p, typenames[reader->type]);
+            fflush(stdout);
+        }
 
         reader->fp = fopen(reader->p, "rb");
         if (!reader->fp) {
@@ -1121,7 +1124,7 @@ int read_block(struct inst *inst, struct reader *reader)
 
         term_pwron(inst->term, TRUE);
     }
-
+ 
     switch (reader->type) {
       case TTYREC:
         ret = fread(reader->hdrbuf, 1, 12, reader->fp);
@@ -1236,7 +1239,7 @@ int read_block(struct inst *inst, struct reader *reader)
 
  file_done:
     sfree(reader->termdata);
-    printf("%d frames\n", reader->nframes);
+    if (!inst->reader) printf("%d frames\n", reader->nframes);
     fclose(reader->fp);
     reader->fp = NULL;
 
@@ -1350,6 +1353,8 @@ int main(int argc, char **argv)
 		    optchr = 'N';
 		else if (!strcmp(p, "use-terminal-size"))
 		    optchr = 'u';
+                else if (!strcmp(p, "lazy"))
+                    optchr = 'l';
 		else if (!strcmp(p, "help")) {
 		    usage();
 		    return 0;
@@ -1446,6 +1451,12 @@ int main(int argc, char **argv)
 		    }
 		}
 		break;
+              case 'l':
+                inst->reader = snew(struct reader);
+                inst->reader->fp = NULL;
+                inst->reader->i = 0;
+                inst->reader->totalsize = 0;
+                break;
 	      default:
 		fprintf(stderr, "%s: unrecognised option '%s'\n",
 			inst->pname, optstr);
@@ -1467,6 +1478,7 @@ int main(int argc, char **argv)
     inst->h = ih;
 
     inst->screenlen = TOTAL;
+    inst->playscreen = snewn(inst->screenlen, int);
     inst->screen = snewn(inst->screenlen, int);
     inst->oldscreen = snewn(inst->screenlen, int);
     for (i = 0; i < inst->screenlen; i++)
@@ -1641,12 +1653,7 @@ int main(int argc, char **argv)
         while (ret > 0);
 
         if (ret < 0) return 1;
-
-        if (!inst->frames) {
-            usage();
-            return 0;
-        }
-
+        
         end = time(NULL);
 
         {
@@ -1659,6 +1666,19 @@ int main(int argc, char **argv)
         printf("Total loading time: %d seconds (%.3g sec/Mb)\n",
                (int)difftime(end, start),
                difftime(end, start) * 1048576 / reader->totalsize);
+    }
+    else {
+        int ret = read_block(inst, inst->reader);
+        if (ret < 0) return 1;
+        /*
+         * ret==0 would break in playing loop,
+         * but should be caught by frame count check below.
+         */
+    }
+
+    if (!inst->frames) {
+        usage();
+        return 0;
     }
 
     if (prepareonly) {
@@ -1714,7 +1734,42 @@ int main(int argc, char **argv)
 		    t = -1;
 	    }
 
-	    if (t >= 0) {
+            if (inst->reader) {
+                int ret;
+                long long tused = 0LL;
+                struct timeval cycle_start, tv;
+                fd_set r;
+
+                wrefresh(stdscr);
+                c = -1;
+                gettimeofday(&cycle_start, NULL);
+                do {
+                    ret = read_block(inst, inst->reader);
+                    if (ret < 0) return 1;
+                    if (ret == 0) {
+                        sfree(inst->reader);
+                        inst->reader = NULL;
+                        /* break delayed until tused has been computed */
+                    }
+
+                    FD_ZERO(&r);
+                    FD_SET(0, &r);
+                    tv.tv_sec = tv.tv_usec = 0;
+                    if (select(1, &r, NULL, NULL, &tv)) c = getch();
+
+                    gettimeofday(&tv, NULL);
+                    tused = 1000000LL * (tv.tv_sec - cycle_start.tv_sec)
+                        + tv.tv_usec - cycle_start.tv_usec;
+
+                    if (!inst->reader || c != -1) break;
+                } while (t < 0 || tused < t);
+
+                t -= tused;
+                tsince += tused;
+                if (tsince > 500000)
+                    fb = -1;
+            }
+	    else if (t >= 0) {
 		struct timeval tv;
 		fd_set r;
 		int ret;

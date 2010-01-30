@@ -6,7 +6,7 @@ IPBT = be_none.o fromucs.o ipbt.o ldiscucs.o localenc.o macenc.o mimeenc.o \
        slookup.o terminal.o time.o toucs.o tree234.o utf8.o uxmisc.o uxucs.o \
        wcwidth.o xenc.o
 
-ipbt: $(IPBT)
+ipbt: $(IPBT) TAGS
 	$(CC) $(LFLAGS) -o ipbt $(IPBT) -lm -lncursesw
 
 be_none.o: be_none.c putty.h puttyps.h unix.h charset.h network.h misc.h \
@@ -55,3 +55,6 @@ clean:
 	rm -f *.o ipbt sbcsdat.c
 	rm -f *.da *.bbg *.bb *.gcov gmon.out
 	rm -f ipbt.1
+
+TAGS: *.c *.h
+	etags $^

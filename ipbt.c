@@ -1886,3 +1886,11 @@ int main(int argc, char **argv)
 
     return 0;
 }
+
+/*
+ * Local variables:
+ * c-basic-offset: 4
+ * eval: (setf (cdr (assoc 'case-label c-offsets-alist)) '*
+ *             (cdr (assoc 'statement-case-intro c-offsets-alist)) '*)
+ * End:
+ */

@@ -3,8 +3,8 @@
 
 IPBT = be_none.o fromucs.o ipbt.o ldiscucs.o localenc.o macenc.o mimeenc.o \
        minibidi.o misc.o noprint.o notiming.o sbcs.o sbcsdat.o settings.o \
-       slookup.o terminal.o time.o toucs.o tree234.o utf8.o uxmisc.o uxucs.o \
-       wcwidth.o xenc.o
+       slookup.o stubs.o terminal.o time.o toucs.o tree234.o utf8.o uxmisc.o \
+       uxucs.o wcwidth.o xenc.o
 
 ipbt: $(IPBT) TAGS
 	$(CC) $(LFLAGS) -o ipbt $(IPBT) -lm -lncursesw

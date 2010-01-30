@@ -104,15 +104,6 @@ void version(void) {
 
 int curses_active;
 
-/*
- * We're only _replaying_ terminal data, so we never need to send
- * back to a real application. Thus, ldisc_send as called from
- * terminal.c is a stub function.
- */
-void ldisc_send(void *handle, char *buf, int len, int interactive)
-{
-}
-
 void cleanup_exit(int code)
 {
     exit(code);
@@ -145,83 +136,6 @@ void modalfatalbox(char *p, ...)
     fputc('\n', stderr);
     cleanup_exit(1);
 }
-
-int char_width(Context ctx, int uc)
-{
-    /*
-     * I don't expect this to come up very often.
-     */
-    return 1;
-}
-
-/*
- * All the terminal report functions, and many of the front end
- * terminal functions, are pointless stubs in this implementation.
- */
-void set_iconic(void *frontend, int iconic) {}
-void move_window(void *frontend, int x, int y) {}
-void set_zorder(void *frontend, int top) {}
-void refresh_window(void *frontend) {}
-void set_zoomed(void *frontend, int zoomed) {}
-int is_iconic(void *frontend) { return 0; }
-void get_window_pos(void *frontend, int *x, int *y) { *x = *y = 0; }
-void get_window_pixels(void *frontend, int *x, int *y) { *x = *y = 0; }
-char *get_window_title(void *frontend, int icon) { return ""; }
-void set_title(void *frontend, char *title) {}
-void set_icon(void *frontend, char *title) {}
-void set_sbar(void *frontend, int total, int start, int page) {}
-void get_clip(void *frontend, wchar_t ** p, int *len) { *p = NULL; *len = 0; }
-void write_clip(void *frontend, wchar_t * data, int *attr, int len,
-		int must_deselect) {}
-void request_paste(void *frontend) {}
-void request_resize(void *frontend, int w, int h) {}
-void palette_reset(void *frontend) {}
-void palette_set(void *frontend, int n, int r, int g, int b) {}
-void set_raw_mouse_mode(void *frontend, int activate) {}
-void logflush(void *handle) {}
-void logtraffic(void *handle, unsigned char c, int logmode) {}
-void do_beep(void *frontend, int mode) {}
-
-/*
- * We don't save and load PuTTY configuration data, so these are
- * all stubs too.
- */
-void *open_settings_w(const char *sessionname, char **errmsg)
-{ return NULL; }
-void write_setting_s(void *handle, const char *key, const char *value) {}
-void write_setting_i(void *handle, const char *key, int value) {}
-void close_settings_w(void *handle) {}
-void *open_settings_r(const char *sessionname)
-{ return NULL; }
-char *read_setting_s(void *handle, const char *key, char *buffer, int buflen)
-{ return NULL; }
-int read_setting_i(void *handle, const char *key, int defvalue)
-{ return defvalue; }
-int read_setting_fontspec(void *handle, const char *name, FontSpec *result)
-{ return 0; }
-int read_setting_filename(void *handle, const char *name, Filename *result)
-{ return 0; }
-void write_setting_fontspec(void *handle, const char *name, FontSpec result) {}
-void write_setting_filename(void *handle, const char *name, Filename result) {}
-void close_settings_r(void *handle) {}
-void *enum_settings_start(void) { return NULL; }
-char *enum_settings_next(void *handle, char *buffer, int buflen) {return NULL;}
-FontSpec platform_default_fontspec(const char *name)
-{
-    FontSpec ret;
-    *ret.name = '\0';
-    return ret;
-}
-Filename platform_default_filename(const char *name)
-{
-    Filename ret;
-    *ret.path = '\0';
-    return ret;
-}
-char *platform_default_s(const char *name) { return NULL; }
-int platform_default_i(const char *name, int def) { return def; }
-void enum_settings_finish(void *handle) {}
-int default_port = -1, default_protocol = -1;
 
 #define FG     0x000F0000
 #define BG     0x00F00000
@@ -359,7 +273,7 @@ void parray_append(struct parray *pa, int frame, int data)
 	pb = snew(struct parray_block);
 	pa->memusage += sizeof(struct parray_block);
 
-	for (i = 0; i < PARRAY_L0COUNT; i++) {
+	for (i = 0; i < (int) PARRAY_L0COUNT; i++) {
 	    pb->u.level0[i].frame = INT_MAX;
 	    pb->u.level0[i].data = 0;
 	}
@@ -416,7 +330,7 @@ void parray_append(struct parray *pa, int frame, int data)
 	count /= PARRAY_L1COUNT;
 
 	n = index / count;
-	assert(n < PARRAY_L1COUNT);
+	assert(n < (int) PARRAY_L1COUNT);
 	index %= count;
 
 	if (!index) {
@@ -570,6 +484,7 @@ void do_text(Context ctx, int x, int y, wchar_t *text, int len,
     struct inst *inst = (struct inst *)ctx;
     int i, index;
     unsigned int fg, bg, val;
+    (void) lattr; /* unused */
 
     for (i = 0; i < len; i++) {
 	assert(y >= 0 && y < inst->h);
@@ -604,10 +519,6 @@ void do_cursor(Context ctx, int x, int y, wchar_t *text, int len,
     do_text(ctx, x, y, text, len, attr, lattr);
 }
 
-void free_ctx(Context ctx)
-{
-}
-
 void store_frame(struct inst *inst, unsigned long long delay,
 		 int fileno, long fileoff)
 {
@@ -640,7 +551,7 @@ void store_frame(struct inst *inst, unsigned long long delay,
 	 * enables us to use it as the `not initialised yet'
 	 * setting for oldscreen.
 	 */
-	assert(inst->screen[i] != 0xFFFFFFFF);
+	assert(inst->screen[i] != (int) 0xFFFFFFFF);
 	if (inst->screen[i] != inst->oldscreen[i])
 	    n++;
     }
@@ -665,7 +576,7 @@ void start_player(struct inst *inst)
     refresh();
     if (has_colors()) {
 	start_color();
-	for (i = 0; i < lenof(inst->cpairs); i++)
+	for (i = 0; i < (int) lenof(inst->cpairs); i++)
 	    inst->cpairs[i] = -1;
 	inst->pairsused = 1;
 	inst->nines = (use_default_colors() == OK);
@@ -675,7 +586,7 @@ void start_player(struct inst *inst)
     curses_active = TRUE;
 }
 
-void end_player(struct inst *inst)
+void end_player(void)
 {
     if (!curses_active)
 	return;
@@ -1880,7 +1791,7 @@ int main(int argc, char **argv)
 		}
 	    }
 	}
-	end_player(inst);
+	end_player();
 	printf("\nPlayback finished.\nLast frame reached was %d\n", f);
     }
 

@@ -1343,7 +1343,11 @@ int main(int argc, char **argv)
 	    return 1;
 	}
 
-	if (deftype == NODEFAULT) {
+	if (inst->filenames[i].type == NODEFAULT) {
+            printf("Detecting filetype for %s... ",
+                   inst->filenames[i].name);
+            fflush(stdout);
+
 	    /*
 	     * First pass: try to identify the file type. We do
 	     * this by looking through the entire file to see which
@@ -1436,6 +1440,7 @@ int main(int argc, char **argv)
 		/*
 		 * No file type matched.
 		 */
+                puts("failed");
 		fprintf(stderr, "%s: '%s' is not a valid input file\n",
 			pname, p);
 		return 1;
@@ -1449,12 +1454,13 @@ int main(int argc, char **argv)
 		    /*
 		     * More than one file type matched.
 		     */
-		    printf("%s matched more than one file type, assuming %s\n",
-			   p, typenames[type]);
+                    fputs("ambiguous, defaulting to ", stdout);
 		}
+
+                puts(typenames[type]);
+                inst->filenames[i].type = type;
 	    }
-	} else
-	    type = deftype;
+	}
 
 	term_pwron(inst->term, TRUE);
 

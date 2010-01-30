@@ -1367,7 +1367,8 @@ int main(int argc, char **argv)
 			iw = ws.ws_col;
 		    } else {
 			fprintf(stderr, "%s: unable to discover"
-				" terminal size%s\n", strerror(errno));
+				" terminal size: %s\n",
+                                pname, strerror(errno));
 		    }
 		}
 		break;

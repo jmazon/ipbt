@@ -159,6 +159,19 @@ struct filename {
     int type;
 };
 
+struct reader {
+    char *p;
+    FILE *fp;
+    char hdrbuf[12];
+    char nhrbuf[4096];
+    char *termdata;
+    int termdatasize, nframes;
+    unsigned long long timestamp, oldtimestamp;
+    unsigned long long frametime;
+    int type, nhrstate;
+    long fileoff;
+};
+
 struct parray;
 
 struct inst {
@@ -1324,35 +1337,35 @@ int main(int argc, char **argv)
     start = time(NULL);
     totalsize = 0;
 
+    /*
+     * First pass: try to identify the file type. We do
+     * this by looking through the entire file to see which
+     * formats it satisfies.
+     *
+     * This step is performed for both eager and lazy modes.
+     */
     for (i = 0; i < inst->nfiles; i++) {
-	char *p = inst->filenames[i].name;
-	FILE *fp;
-	unsigned char hdrbuf[12];
-	unsigned char nhrbuf[4096];
-	char *termdata = NULL;
-	int termdatasize = 0, termdatalen, ret, nframes = 0;
-	unsigned long long timestamp, oldtimestamp = 0LL;
-	unsigned long long frametime, totaltime = 0LL;
-	int typemask, type, nhrstate;
-	long fileoff, filelen;
-
-	fp = fopen(p, "rb");
-	if (!fp) {
-	    fprintf(stderr, "%s: unable to open '%s': %s\n",
-		    pname, p, strerror(errno));
-	    return 1;
-	}
-
 	if (inst->filenames[i].type == NODEFAULT) {
+            char *p = inst->filenames[i].name;
+            FILE *fp;
+            unsigned char hdrbuf[12];
+            unsigned char nhrbuf[4096];
+            int termdatalen, ret;
+            unsigned long long timestamp, oldtimestamp = 0LL;
+            int typemask, type, nhrstate;
+            long filelen;
+
+            fp = fopen(p, "rb");
+            if (!fp) {
+                fprintf(stderr, "%s: unable to open '%s': %s\n",
+                        pname, p, strerror(errno));
+                return 1;
+            }
+
             printf("Detecting filetype for %s... ",
                    inst->filenames[i].name);
             fflush(stdout);
 
-	    /*
-	     * First pass: try to identify the file type. We do
-	     * this by looking through the entire file to see which
-	     * formats it satisfies.
-	     */
 	    typemask = 0;
 	    oldtimestamp = 0;
 	    fseek(fp, 0, SEEK_END);
@@ -1460,128 +1473,160 @@ int main(int argc, char **argv)
                 puts(typenames[type]);
                 inst->filenames[i].type = type;
 	    }
+            fclose(fp);
 	}
+    }
 
-	term_pwron(inst->term, TRUE);
+    /*
+     * Second pass: read files and store terminal state to parrays.
+     */
+    struct reader treader, *reader = &treader;
+    reader->fp = NULL;
+    i = 0;
+    while (1) {
+        int ret, termdatalen;
 
-	printf("Reading %s (%s) ... ", p, typenames[type]);
-	fflush(stdout);
+        if (!reader->fp) {
+            reader->p = inst->filenames[i].name;
+            reader->termdata = NULL;
+            reader->termdatasize = 0;
+            reader->nframes = 0;
+            reader->oldtimestamp = 0LL;
+            reader->type = inst->filenames[i].type;
 
-	switch (type) {
-	  case TTYREC:
-	    while (1) {
-		ret = fread(hdrbuf, 1, 12, fp);
-		fileoff = ftell(fp);
-		if (ret == 0) {
-		    break;
-		} else if (ret < 0) {
-		    fprintf(stderr, "%s: error reading '%s': %s\n",
-			    pname, p, strerror(errno));
-		    return 1;
-		} else if (ret < 12) {
-		    fprintf(stderr, "%s: unexpected EOF reading '%s'\n",
-			    pname, p);
-		    return 1;
-		}
+            printf("Reading %s (%s) ... ", reader->p, typenames[reader->type]);
+            fflush(stdout);
 
-		termdatalen = GET_32BIT_LSB_FIRST(hdrbuf + 8);
-		if (termdatasize < termdatalen) {
-		    termdatasize = termdatalen;
-		    termdata = sresize(termdata, termdatasize, char);
-		}
+            reader->fp = fopen(reader->p, "rb");
+            if (!reader->fp) {
+                fprintf(stderr, "%s: unable to open '%s': %s\n",
+                        pname, reader->p, strerror(errno));
+                return 1;
+            }
 
-		ret = fread(termdata, 1, termdatalen, fp);
-		if (ret == 0) {
-		    break;
-		} else if (ret < 0) {
-		    fprintf(stderr, "%s: error reading '%s': %s\n",
-			    pname, p, strerror(errno));
-		    return 1;
-		} else if (ret < termdatalen) {
-		    fprintf(stderr, "%s: unexpected EOF reading '%s'\n",
-			    pname, p);
-		    return 1;
-		}
+            term_pwron(inst->term, TRUE);
+        }
 
-		totalsize += 12 + termdatalen;
+	switch (reader->type) {
+          case TTYREC:
+            ret = fread(reader->hdrbuf, 1, 12, reader->fp);
+            reader->fileoff = ftell(reader->fp);
+            if (ret == 0) {
+                goto file_done;
+            } else if (ret < 0) {
+                fprintf(stderr, "%s: error reading '%s': %s\n",
+                        pname, reader->p, strerror(errno));
+                return 1;
+            } else if (ret < 12) {
+                fprintf(stderr, "%s: unexpected EOF reading '%s'\n",
+                        pname, reader->p);
+                return 1;
+            }
 
-		timestamp = GET_32BIT_LSB_FIRST(hdrbuf);
-		timestamp = timestamp*1000000 + GET_32BIT_LSB_FIRST(hdrbuf+4);
-		if (oldtimestamp)
-		    frametime = timestamp - oldtimestamp;
-		else
-		    frametime = (inst->movietime == 0 ? 0 : 1000000);
-		oldtimestamp = timestamp;
+            termdatalen = GET_32BIT_LSB_FIRST(reader->hdrbuf + 8);
+            if (reader->termdatasize < termdatalen) {
+                reader->termdatasize = termdatalen;
+                reader->termdata = sresize(reader->termdata, reader->termdatasize, char);
+            }
 
-		term_data(inst->term, FALSE, termdata, termdatalen);
-		store_frame(inst, frametime, i, fileoff);
+            ret = fread(reader->termdata, 1, termdatalen, reader->fp);
+            if (ret == 0) {
+                goto file_done;
+            } else if (ret < 0) {
+                fprintf(stderr, "%s: error reading '%s': %s\n",
+                        pname, reader->p, strerror(errno));
+                return 1;
+            } else if (ret < termdatalen) {
+                fprintf(stderr, "%s: unexpected EOF reading '%s'\n",
+                        pname, reader->p);
+                return 1;
+            }
 
-		nframes++;
-		totaltime += frametime;
-	    }
-	    break;
-	  case NHRECORDER:
-	    fileoff = 0;
-	    frametime = (inst->movietime == 0 ? 0 : 1000000);
-	    nhrstate = 0;
-	    oldtimestamp = 0;
-	    timestamp = 0;
-	    while (1) {
+            totalsize += 12 + termdatalen;
+
+            reader->timestamp = GET_32BIT_LSB_FIRST(reader->hdrbuf);
+            reader->timestamp = reader->timestamp*1000000 + GET_32BIT_LSB_FIRST(reader->hdrbuf+4);
+            if (reader->oldtimestamp)
+                reader->frametime = reader->timestamp - reader->oldtimestamp;
+            else
+                reader->frametime = (inst->movietime == 0 ? 0 : 1000000);
+            reader->oldtimestamp = reader->timestamp;
+
+            term_data(inst->term, FALSE, reader->termdata, termdatalen);
+            store_frame(inst, reader->frametime, i, reader->fileoff);
+
+            reader->nframes++;
+            break; /* case TTYREC */
+
+          case NHRECORDER:
+            if (!reader->nframes) {
+                reader->fileoff = 0;
+                reader->frametime = (inst->movietime == 0 ? 0 : 1000000);
+                reader->nhrstate = 0;
+                reader->oldtimestamp = 0;
+                reader->timestamp = 0;
+            }
+
+	    {
 		int i;
-		long thisoff = ftell(fp);
+		long thisoff = ftell(reader->fp);
 
-		ret = fread(nhrbuf, 1, 4096, fp);
+		ret = fread(reader->nhrbuf, 1, 4096, reader->fp);
 		if (ret == 0)
-		    break;
+		    goto file_done;
 
 		totalsize += ret;
 
 		for (i = 0; i < ret; i++) {
-		    switch (nhrstate) {
+		    switch (reader->nhrstate) {
 		      case 0:
-			if (nhrbuf[i] == 0) {
-			    nhrstate = 1;
-			    timestamp = 0;
+			if (reader->nhrbuf[i] == 0) {
+			    reader->nhrstate = 1;
+			    reader->timestamp = 0;
 			} else {
-			    term_data(inst->term, FALSE, (char *)nhrbuf+i, 1);
+			    term_data(inst->term, FALSE, (char *)reader-> nhrbuf+i, 1);
 			}
 			break;
 		      case 1:
-			timestamp |= (unsigned char)nhrbuf[i];
-			nhrstate = 2;
+			reader->timestamp |= (unsigned char)reader->nhrbuf[i];
+			reader->nhrstate = 2;
 			break;
 		      case 2:
-			timestamp |= (unsigned char)nhrbuf[i] << 8;
-			nhrstate = 3;
+			reader->timestamp |= (unsigned char)reader->nhrbuf[i] << 8;
+			reader->nhrstate = 3;
 			break;
 		      case 3:
-			timestamp |= (unsigned char)nhrbuf[i] << 16;
-			nhrstate = 4;
+			reader->timestamp |= (unsigned char)reader->nhrbuf[i] << 16;
+			reader->nhrstate = 4;
 			break;
 		      case 4:
-			timestamp |= (unsigned char)nhrbuf[i] << 24;
-			nhrstate = 0;
+			reader->timestamp |= (unsigned char)reader->nhrbuf[i] << 24;
+			reader->nhrstate = 0;
 
-			store_frame(inst, frametime, i, fileoff);
-			nframes++;
-			totaltime += frametime;
+			store_frame(inst, reader->frametime, i, reader->fileoff);
+			reader->nframes++;
 
-			frametime = (timestamp - oldtimestamp) * 10000;
-			oldtimestamp = timestamp;
+			reader->frametime = (reader->timestamp - reader->oldtimestamp) * 10000;
+			reader->oldtimestamp = reader->timestamp;
 
-			fileoff = thisoff + i + 1;
+			reader->fileoff = thisoff + i + 1;
 			break;
 		    }
 		}
 	    }
-	    break;
+	    break; /* case NHRECORDER */
 	}
 
-	sfree(termdata);
+        continue;
 
-	printf("%d frames\n", nframes);
+    file_done:
+	sfree(reader->termdata);
+	printf("%d frames\n", reader->nframes);
+	fclose(reader->fp);
+        reader->fp = NULL;
 
-	fclose(fp);
+        i++;
+        if (i >= inst->nfiles) break;
     }
 
     if (!inst->frames) {

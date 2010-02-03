@@ -1706,8 +1706,6 @@ int main(int argc, char **argv)
 
 	    if (f < 0)
 		f = 0;
-	    if (f >= inst->frames)
-		f = inst->frames - 1;
 
 	    display_frame(inst, f);
 	    if (changed) {
@@ -1864,8 +1862,17 @@ int main(int argc, char **argv)
 		f = inst->number;
 		inst->number = 0;
 		changed = TRUE;
-	    } else if (c == 'G') {
+	    } else if (c == 'F' || c == 'G') {
 		f = inst->frames - 1 - inst->number;
+                if (c == 'G' && inst->reader && inst->number == 0) {
+                    /* 
+                     * With the current storage scheme, normal
+                     * playback needs to have parsed one frame in
+                     * advance in order to know how long to wait
+                     * before flipping to the next one.
+                     */
+                    f--;
+                }
 		inst->number = 0;
 		changed = TRUE;
 	    } else if (c == ' ' || c == '>') {
@@ -1873,7 +1880,7 @@ int main(int argc, char **argv)
 		inst->number = 0;
 		changed = TRUE;
 	    } else if (c == -1 && inst->playing) {
-		f++;
+		if (f <= inst->frames - 1) f++;
 		changed = TRUE;
 	    } else if (c == 'p' || c == 'P' || c == 's' || c == 'S') {
 		inst->playing = !inst->playing;

@@ -1707,8 +1707,10 @@ int main(int argc, char **argv)
 
 	    if (f < 0)
 		f = 0;
-	    if (f >= inst->frames && !inst->reader)
+	    if (f >= inst->frames && !inst->reader) {
 		f = inst->frames - 1;
+                inst->playing = FALSE;
+            }
 
 	    display_frame(inst, f);
 	    if (changed) {

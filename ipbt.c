@@ -1706,6 +1706,8 @@ int main(int argc, char **argv)
 
 	    if (f < 0)
 		f = 0;
+	    if (f >= inst->frames && !inst->reader)
+		f = inst->frames - 1;
 
 	    display_frame(inst, f);
 	    if (changed) {
@@ -1880,6 +1882,11 @@ int main(int argc, char **argv)
 		inst->number = 0;
 		changed = TRUE;
 	    } else if (c == -1 && inst->playing) {
+                /*
+                 * needs additional bounds check because we don't want
+                 * to advance the sought frame counter if we haven't
+                 * reached it yet--which can happen in lazy mode
+                 */
 		if (f <= inst->frames - 1) f++;
 		changed = TRUE;
 	    } else if (c == 'p' || c == 'P' || c == 's' || c == 'S') {

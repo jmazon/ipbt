@@ -804,7 +804,8 @@ void display_frame(struct inst *inst, int f)
 	    sprintf(buf4, " Speed:%20s ", buf2);
 	else
 	    buf4[0] = '\0';
-	sprintf(buf2, "%d / %d", f, inst->frames);
+        if (inst->reader) sprintf(buf2, "%d / %d*", f, inst->frames);
+        else              sprintf(buf2, "%d / %d",  f, inst->frames);
 	sprintf(buf1, " Frame:%20s ", buf2);
 	sprintf(buf2, " Time:%21.3f ", t / 1000000.0);
 	sprintf(buf3, " Mode:%21s ",

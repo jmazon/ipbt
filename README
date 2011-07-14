@@ -1,3 +1,21 @@
+This tree contain my patches to Simon Tatham's excellent IPBT player.
+
+The main difference is what I'd call "autoplay" mode: instead of
+analyzing the whole movie file and starting playback only after that,
+playback starts immediately while the analysis is performed in the
+background.
+Activate using the -l option (for "lazy").  Take care that if you
+don't specify a filetype using -T or -N, it will still be autodetected
+by reading the whole file twice, which can be a bit confusing
+considering -l gives the impression of a stream reading mode.
+
+Enjoy!
+JBM
+
+
+Simon's original README below.
+======================================================================
+
 This directory contains `ipbt', a high-tech player for `ttyrec'
 files.
 

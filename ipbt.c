@@ -1669,12 +1669,21 @@ int main(int argc, char **argv)
                difftime(end, start) * 1048576 / reader->totalsize);
     }
     else {
-        int ret = read_block(inst, inst->reader);
-        if (ret < 0) return 1;
         /*
-         * ret==0 would break in playing loop,
-         * but should be caught by frame count check below.
+         * Read the first two frames so we have enough information for the
+         * first sleep.  If only one frame was available, the sleep delay
+         * would be computed as a difference of the last frame with itself,
+         * i.e. zero, so the player would loop in a read frame-display
+         * frame-don't sleep circuit.  Equivalent to follow mode.
+         * We'd rather start in normal play mode.
          */
+        int ret = read_block(inst, inst->reader);
+        if (ret > 0) ret = read_block(inst, inst->reader);
+        if (ret < 0) return 1;
+        if (ret == 0) {
+            sfree(inst->reader);
+            inst->reader = NULL;
+        }
     }
 
     if (!inst->frames) {
@@ -1695,7 +1704,7 @@ int main(int argc, char **argv)
 
 	inst->number = 0;
 	inst->osd = FALSE;
-	inst->playing = FALSE;
+	inst->playing = inst->reader ? TRUE : FALSE;
 	inst->logmod = FALSE;
 	inst->speedmod = 1.0;
 	inst->searchstr = NULL;

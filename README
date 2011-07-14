@@ -65,6 +65,9 @@ here's a quick list of the available keystrokes during playback:
    jumps to a particular frame.
  * `G' jumps to the end of the animation. Prefixing a number jumps
    to that many frames from the end.
+ * `F' jumps to the end of the currently decoded animation, and follows
+   it as more is decoded.  Cancel by jumping to any other frame, e.g.
+   with `G'.  Only makes sense in lazy parsing mode.
  * `p' (and also `s', for historical reasons) toggles pause mode.
    Pause mode is initially enabled.
  * '/' searches forward for a frame containing the given text.
